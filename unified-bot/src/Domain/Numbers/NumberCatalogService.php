@@ -24,6 +24,22 @@ class NumberCatalogService
         return array_map([$this, 'formatCountry'], $records);
     }
 
+    /**
+     * @return array{items: array<int, array<string, mixed>>, has_next: bool}
+     */
+    public function paginate(int $page, int $perPage = 8): array
+    {
+        $all = $this->list();
+        $offset = max(0, $page * $perPage);
+        $items = array_slice($all, $offset, $perPage);
+        $hasNext = $offset + $perPage < count($all);
+
+        return [
+            'items' => $items,
+            'has_next' => $hasNext,
+        ];
+    }
+
     public function find(string $code): ?array
     {
         $country = $this->countries->find($code);

@@ -6,6 +6,7 @@ namespace App\Presentation;
 
 use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
+use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Storage\JsonStore;
@@ -21,6 +22,7 @@ class BotKernel
     private UserManager $userManager;
     private WalletService $wallets;
     private NumberCatalogService $numberCatalog;
+    private NumberPurchaseService $numberPurchase;
 
     /**
      * @var array<int, string>
@@ -34,7 +36,8 @@ class BotKernel
         TelegramClient $telegram,
         UserManager $userManager,
         WalletService $wallets,
-        NumberCatalogService $numberCatalog
+        NumberCatalogService $numberCatalog,
+        NumberPurchaseService $numberPurchase
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -43,6 +46,7 @@ class BotKernel
         $this->userManager = $userManager;
         $this->wallets = $wallets;
         $this->numberCatalog = $numberCatalog;
+        $this->numberPurchase = $numberPurchase;
         $this->languageCache = $this->store->load('langs', []);
     }
 
