@@ -20,10 +20,14 @@ use App\Infrastructure\Numbers\SpiderNumberProvider;
 use App\Infrastructure\Repository\NumberCountryRepository;
 use App\Infrastructure\Repository\NumberOrderRepository;
 use App\Infrastructure\Repository\SettingsRepository;
+use App\Infrastructure\Repository\ServiceCategoryRepository;
+use App\Infrastructure\Repository\ServiceRepository;
+use App\Infrastructure\Repository\SmmOrderRepository;
 use App\Infrastructure\Repository\TicketRepository;
 use App\Infrastructure\Repository\TransactionRepository;
 use App\Infrastructure\Repository\UserRepository;
 use App\Infrastructure\Repository\WalletRepository;
+use App\Infrastructure\Smm\OrbitexaProvider;
 use App\Infrastructure\Storage\JsonStore;
 use App\Infrastructure\Telegram\TelegramClient;
 use App\Presentation\BotKernel;
@@ -37,6 +41,7 @@ $connection = new Connection($databaseConfig);
 $languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php');
 $store = new JsonStore([
     'langs' => APP_BASE_PATH . '/storage/langs.json',
+    'smm_flow' => APP_BASE_PATH . '/storage/smm_flow.json',
 ]);
 $keyboardFactory = new KeyboardFactory();
 $telegram = new TelegramClient($telegramConfig);
@@ -47,15 +52,20 @@ $orderRepository = new NumberOrderRepository($connection);
 $settingsRepository = new SettingsRepository($connection);
 $transactionRepository = new TransactionRepository($connection);
 $ticketRepository = new TicketRepository($connection);
+$serviceCategoryRepository = new ServiceCategoryRepository($connection);
+$serviceRepository = new ServiceRepository($connection);
+$smmOrderRepository = new SmmOrderRepository($connection);
 $userManager = new UserManager($userRepository);
 $wallets = new WalletService($walletRepository);
 $numberCatalog = new NumberCatalogService($countryRepository);
 $numberProvider = new SpiderNumberProvider($providersConfig['numbers']['spider'] ?? []);
+$smmProvider = new OrbitexaProvider($providersConfig['smm']['orbitexa'] ?? []);
 $settingsService = new SettingsService($settingsRepository);
 $forcedSubscription = new ForcedSubscriptionService($settingsService, $telegram);
 $notificationService = new NotificationService($settingsService, $telegram);
 $transactionService = new TransactionService($transactionRepository);
 $ticketService = new TicketService($ticketRepository);
+$smmCatalog = new SmmCatalogService($serviceCategoryRepository, $serviceRepository);
 $numberPurchase = new NumberPurchaseService(
     $numberCatalog,
     $wallets,
@@ -71,6 +81,13 @@ $numberCodes = new NumberCodeService(
     $ticketService,
     $transactionService
 );
+$smmPurchase = new SmmPurchaseService(
+    $smmCatalog,
+    $wallets,
+    $transactionService,
+    $smmProvider,
+    $smmOrderRepository
+);
 
 $kernel = new BotKernel(
     $languages,
@@ -82,7 +99,9 @@ $kernel = new BotKernel(
     $numberCatalog,
     $numberPurchase,
     $numberCodes,
-    $forcedSubscription
+    $forcedSubscription,
+    $smmCatalog,
+    $smmPurchase
 );
 
 $payload = file_get_contents('php://input');

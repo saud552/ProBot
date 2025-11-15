@@ -8,6 +8,8 @@ use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
+use App\Domain\Smm\SmmCatalogService;
+use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Settings\ForcedSubscriptionService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
@@ -29,11 +31,17 @@ class BotKernel
     private NumberPurchaseService $numberPurchase;
     private NumberCodeService $numberCodes;
     private ForcedSubscriptionService $forcedSubscription;
+    private SmmCatalogService $smmCatalog;
+    private SmmPurchaseService $smmPurchase;
 
     /**
      * @var array<int, string>
      */
     private array $languageCache = [];
+    /**
+     * @var array<int, array<string, mixed>>
+     */
+    private array $smmFlow = [];
 
     public function __construct(
         LanguageManager $languages,
@@ -45,7 +53,9 @@ class BotKernel
         NumberCatalogService $numberCatalog,
         NumberPurchaseService $numberPurchase,
         NumberCodeService $numberCodes,
-        ForcedSubscriptionService $forcedSubscription
+        ForcedSubscriptionService $forcedSubscription,
+        SmmCatalogService $smmCatalog,
+        SmmPurchaseService $smmPurchase
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -57,7 +67,10 @@ class BotKernel
         $this->numberPurchase = $numberPurchase;
         $this->numberCodes = $numberCodes;
         $this->forcedSubscription = $forcedSubscription;
+        $this->smmCatalog = $smmCatalog;
+        $this->smmPurchase = $smmPurchase;
         $this->languageCache = $this->store->load('langs', []);
+        $this->smmFlow = $this->store->load('smm_flow', []);
     }
 
     public function handle(array $update): void
@@ -95,6 +108,9 @@ class BotKernel
         ]);
         $this->wallets->ensure((int)$userRecord['id'], 'USD');
 
+        $userDbId = (int)$userRecord['id'];
+        $telegramUserId = (int)$userRecord['telegram_id'];
+
         $userLang = $this->languages->ensure($userRecord['language_code'] ?? $languageCode);
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
@@ -105,7 +121,16 @@ class BotKernel
         }
 
         if ($text === '/start') {
-            $this->sendMessage($chatId, $strings['welcome'] ?? 'Welcome', $this->keyboardFactory->mainMenu($strings, $changeLabel));
+            $this->clearSmmState($userDbId);
+            $this->sendMessage(
+                $chatId,
+                $strings['welcome'] ?? 'Welcome',
+                $this->keyboardFactory->mainMenu($strings, $changeLabel)
+            );
+            return;
+        }
+
+        if ($this->handleSmmTextInput($chatId, $userDbId, $text, $strings)) {
             return;
         }
 
@@ -169,31 +194,21 @@ class BotKernel
             return;
         }
 
+        if (($parts[0] ?? '') === 'smm') {
+            $this->handleSmmCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $telegramUserId,
+                $parts,
+                $strings,
+                $backLabel
+            );
+            return;
+        }
+
         switch ($data) {
-            case 'smm:root':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $strings['menu_purchase'] ?? 'Boosting',
-                    $this->keyboardFactory->smmMenu($strings, $backLabel)
-                );
-                break;
-            case 'smm:usd':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $strings['smm_usd_button'] ?? 'Boost with USD',
-                    $this->keyboardFactory->smmMenu($strings, $backLabel)
-                );
-                break;
-            case 'smm:stars':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $strings['smm_stars_button'] ?? 'Boost with Stars',
-                    $this->keyboardFactory->smmMenu($strings, $backLabel)
-                );
-                break;
             case 'back':
                 $this->editMessage(
                     $chatId,
@@ -525,6 +540,277 @@ class BotKernel
     /**
      * @param array<string, string> $strings
      */
+    private function handleSmmCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $telegramUserId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'root';
+        switch ($action) {
+            case 'root':
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    $strings['main_smm_button'] ?? 'Boosting Section',
+                    $this->keyboardFactory->smmMenu($strings, $backLabel)
+                );
+                return;
+            case 'usd':
+                $this->showSmmCategories($chatId, $messageId, $strings, $backLabel);
+                return;
+            case 'cat':
+                $categoryId = (int)($parts[2] ?? 0);
+                $this->showSmmServices($chatId, $messageId, $categoryId, $strings, $backLabel, $callbackId);
+                return;
+            case 'serv':
+                $serviceId = (int)($parts[2] ?? 0);
+                $categoryId = (int)($parts[3] ?? 0);
+                $this->showSmmServiceDetails($chatId, $messageId, $serviceId, $categoryId, $strings, $backLabel, $callbackId);
+                return;
+            case 'link':
+                $serviceId = (int)($parts[2] ?? 0);
+                $categoryId = (int)($parts[3] ?? 0);
+                $this->startSmmLinkCapture($chatId, $userDbId, $serviceId, $categoryId, $strings, $callbackId);
+                return;
+            case 'confirm':
+                $serviceId = (int)($parts[2] ?? 0);
+                $this->completeSmmOrder($chatId, $messageId, $callbackId, $userDbId, $serviceId, $strings);
+                return;
+            case 'cancel':
+                $this->clearSmmState($userDbId);
+                $this->sendMessage($chatId, $strings['smm_input_cancelled'] ?? 'Operation cancelled.', []);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'stars':
+                $this->answerCallback(
+                    $callbackId,
+                    $strings['stars_disabled'] ?? 'Stars option unavailable.',
+                    true
+                );
+                return;
+            default:
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    $strings['main_smm_button'] ?? 'Boosting Section',
+                    $this->keyboardFactory->smmMenu($strings, $backLabel)
+                );
+                return;
+        }
+    }
+
+    private function showSmmCategories(int $chatId, int $messageId, array $strings, string $backLabel): void
+    {
+        $categories = $this->smmCatalog->categories();
+        $text = $strings['smm_select_category'] ?? 'Select a category.';
+
+        if ($categories === []) {
+            $this->editMessage($chatId, $messageId, $text . PHP_EOL . ($strings['no_numbers'] ?? 'No data.'), [
+                [
+                    ['text' => $backLabel, 'callback_data' => 'back'],
+                ],
+            ]);
+            return;
+        }
+
+        $keyboard = [];
+        $row = [];
+        foreach ($categories as $category) {
+            $row[] = [
+                'text' => $category['name'],
+                'callback_data' => sprintf('smm:cat:%d', $category['id']),
+            ];
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $keyboard[] = $row;
+        }
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showSmmServices(
+        int $chatId,
+        int $messageId,
+        int $categoryId,
+        array $strings,
+        string $backLabel,
+        ?string $callbackId = null
+    ): void {
+        $services = $this->smmCatalog->servicesByCategory($categoryId);
+        $category = $this->smmCatalog->category($categoryId);
+        if (!$category) {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Category unavailable.', true);
+            return;
+        }
+
+        $text = ($strings['smm_select_service'] ?? 'Select a service.') . PHP_EOL . $category['name'];
+        if ($services === []) {
+            $text .= PHP_EOL . ($strings['no_numbers'] ?? 'No services available.');
+            $keyboard = [
+                [
+                    ['text' => $backLabel, 'callback_data' => 'smm:root'],
+                ],
+            ];
+            $this->editMessage($chatId, $messageId, $text, $keyboard);
+            return;
+        }
+
+        $keyboard = [];
+        foreach ($services as $service) {
+            $keyboard[] = [
+                [
+                    'text' => sprintf('%s • $%0.2f/1k', $service['name'], $service['rate_per_1k']),
+                    'callback_data' => sprintf('smm:serv:%d:%d', $service['id'], $categoryId),
+                ],
+            ];
+        }
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'smm:root'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showSmmServiceDetails(
+        int $chatId,
+        int $messageId,
+        int $serviceId,
+        int $categoryId,
+        array $strings,
+        string $backLabel,
+        ?string $callbackId = null
+    ): void {
+        $service = $this->smmCatalog->service($serviceId);
+        if (!$service) {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Service unavailable.', true);
+            return;
+        }
+
+        $priceInfo = $strings['smm_price_info'] ?? 'Price/1k: __rate__$ | Min: __min__ | Max: __max__';
+        $priceInfo = str_replace(
+            ['__rate__', '__min__', '__max__'],
+            [
+                number_format((float)$service['rate_per_1k'], 2),
+                (string)$service['min_quantity'],
+                (string)$service['max_quantity'],
+            ],
+            $priceInfo
+        );
+
+        $text = ($strings['smm_service_details'] ?? 'Service details') . PHP_EOL;
+        $text .= $service['name'] . PHP_EOL;
+        if (!empty($service['description'])) {
+            $text .= $service['description'] . PHP_EOL;
+        }
+        $text .= $priceInfo;
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['smm_continue'] ?? 'Continue',
+                    'callback_data' => sprintf('smm:link:%d:%d', $serviceId, $categoryId),
+                ],
+            ],
+            [
+                [
+                    'text' => $backLabel,
+                    'callback_data' => sprintf('smm:cat:%d', $categoryId),
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function startSmmLinkCapture(
+        int $chatId,
+        int $userDbId,
+        int $serviceId,
+        int $categoryId,
+        array $strings,
+        ?string $callbackId
+    ): void {
+        $service = $this->smmCatalog->service($serviceId);
+        if (!$service) {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Service unavailable.', true);
+            return;
+        }
+
+        $this->setSmmState($userDbId, [
+            'state' => 'await_link',
+            'service_id' => $serviceId,
+            'service_name' => $service['name'],
+            'category_id' => $categoryId,
+            'rate_per_1k' => (float)$service['rate_per_1k'],
+            'currency' => $service['currency'],
+            'min' => (int)$service['min_quantity'],
+            'max' => (int)$service['max_quantity'],
+            'link' => null,
+            'quantity' => null,
+            'price' => null,
+        ]);
+
+        $this->answerCallback($callbackId, '✅');
+        $this->sendMessage($chatId, $strings['smm_enter_link'] ?? 'Send the link.', []);
+    }
+
+    private function completeSmmOrder(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $serviceId,
+        array $strings
+    ): void {
+        $state = $this->getSmmState($userDbId);
+        if (!$state || ($state['service_id'] ?? 0) !== $serviceId || ($state['state'] ?? '') !== 'await_confirm') {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Nothing to confirm.', true);
+            return;
+        }
+
+        try {
+            $order = $this->smmPurchase->purchaseUsd($userDbId, $serviceId, (string)$state['link'], (int)$state['quantity']);
+        } catch (Throwable $e) {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Order failed.', true);
+            return;
+        }
+
+        $this->clearSmmState($userDbId);
+
+        $text = ($strings['smm_order_success'] ?? 'Order placed.') . PHP_EOL;
+        $text .= sprintf(
+            "%s\n%s",
+            $state['service_name'],
+            sprintf('ID: %s', $order['provider_order_id'] ?? '-')
+        );
+
+        $this->editMessage($chatId, $messageId, $text, [
+            [
+                ['text' => $strings['smm_usd_button'] ?? 'Boost (USD)', 'callback_data' => 'smm:usd'],
+            ],
+            [
+                ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+            ],
+        ]);
+
+        $this->answerCallback($callbackId, '✅');
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
     private function handleNumberCodeAction(
         int $chatId,
         int $messageId,
@@ -585,6 +871,86 @@ class BotKernel
 
         $this->editMessage($chatId, $messageId, $text, $keyboard);
         $this->answerCallback($callbackId, '✅');
+    }
+
+    private function handleSmmTextInput(
+        int $chatId,
+        int $userDbId,
+        string $text,
+        array $strings
+    ): bool {
+        $state = $this->getSmmState($userDbId);
+        if (!$state) {
+            return false;
+        }
+
+        $trimmed = trim($text);
+        if ($trimmed === '') {
+            return false;
+        }
+
+        if ($trimmed === '/cancel') {
+            $this->clearSmmState($userDbId);
+            $this->sendMessage($chatId, $strings['smm_input_cancelled'] ?? 'Operation cancelled.', []);
+            return true;
+        }
+
+        switch ($state['state'] ?? '') {
+            case 'await_link':
+                $state['link'] = $trimmed;
+                $state['state'] = 'await_quantity';
+                $this->setSmmState($userDbId, $state);
+                $this->sendMessage($chatId, $strings['smm_link_saved'] ?? 'Link saved. Send quantity.', []);
+                $message = str_replace(
+                    ['__min__', '__max__'],
+                    [(string)$state['min'], (string)$state['max']],
+                    $strings['smm_enter_quantity'] ?? 'Send quantity between __min__ and __max__.'
+                );
+                $this->sendMessage($chatId, $message, []);
+                return true;
+            case 'await_quantity':
+                if (!ctype_digit($trimmed)) {
+                    $this->sendMessage($chatId, $strings['smm_quantity_invalid'] ?? 'Invalid quantity.', []);
+                    return true;
+                }
+                $quantity = (int)$trimmed;
+                $min = (int)$state['min'];
+                $max = (int)$state['max'];
+                if ($quantity < $min || $quantity > $max) {
+                    $this->sendMessage($chatId, $strings['smm_quantity_invalid'] ?? 'Invalid quantity.', []);
+                    return true;
+                }
+
+                $price = $this->smmCatalog->calculatePrice((float)$state['rate_per_1k'], $quantity);
+                $state['quantity'] = $quantity;
+                $state['price'] = $price;
+                $state['state'] = 'await_confirm';
+                $this->setSmmState($userDbId, $state);
+
+                $summary = str_replace(
+                    ['__service__', '__quantity__', '__price__'],
+                    [$state['service_name'], (string)$quantity, number_format($price, 2)],
+                    $strings['smm_order_summary'] ?? 'Service: __service__ / Qty: __quantity__ / Price: __price__$'
+                );
+
+                $keyboard = [
+                    [
+                        [
+                            'text' => $strings['smm_confirm_button'] ?? 'Confirm',
+                            'callback_data' => sprintf('smm:confirm:%d', $state['service_id']),
+                        ],
+                        [
+                            'text' => $strings['smm_cancel_button'] ?? 'Cancel',
+                            'callback_data' => 'smm:cancel',
+                        ],
+                    ],
+                ];
+
+                $this->sendMessage($chatId, $summary, $keyboard);
+                return true;
+        }
+
+        return false;
     }
 
     private function determineLanguage(int $userId, string $preferred): string
@@ -713,5 +1079,24 @@ class BotKernel
         ]);
 
         return false;
+    }
+
+    private function getSmmState(int $userId): ?array
+    {
+        return $this->smmFlow[$userId] ?? null;
+    }
+
+    private function setSmmState(int $userId, array $state): void
+    {
+        $this->smmFlow[$userId] = $state;
+        $this->store->persist('smm_flow', $this->smmFlow);
+    }
+
+    private function clearSmmState(int $userId): void
+    {
+        if (isset($this->smmFlow[$userId])) {
+            unset($this->smmFlow[$userId]);
+            $this->store->persist('smm_flow', $this->smmFlow);
+        }
     }
 }
