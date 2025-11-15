@@ -153,6 +153,26 @@ CREATE TABLE IF NOT EXISTS orders_smm (
     INDEX idx_orders_smm_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS star_payments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    telegram_user_id BIGINT UNSIGNED NOT NULL,
+    type ENUM('number','smm') NOT NULL,
+    reference VARCHAR(191) NOT NULL,
+    payload VARCHAR(128) NOT NULL UNIQUE,
+    price_usd DECIMAL(10,2) NOT NULL,
+    stars_amount INT UNSIGNED NOT NULL,
+    currency VARCHAR(10) NOT NULL DEFAULT 'XTR',
+    status ENUM('pending','completed','failed') NOT NULL DEFAULT 'pending',
+    meta JSON NULL,
+    provider_payment_charge_id VARCHAR(191) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    fulfilled_at TIMESTAMP NULL,
+    CONSTRAINT fk_star_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_star_payments_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS tickets (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,

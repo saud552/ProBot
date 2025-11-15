@@ -49,6 +49,18 @@ class SettingsService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function stars(): array
+    {
+        return $this->remember('stars', function (): array {
+            return $this->settings->find('stars') ?? [
+                'usd_per_star' => 0.011,
+            ];
+        });
+    }
+
+    /**
      * @param callable():array<string, mixed> $resolver
      * @return array<string, mixed>
      */

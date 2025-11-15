@@ -8,6 +8,7 @@ use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
+use App\Domain\Payments\StarPaymentService;
 use App\Domain\Smm\SmmCatalogService;
 use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Settings\ForcedSubscriptionService;
@@ -33,6 +34,7 @@ class BotKernel
     private ForcedSubscriptionService $forcedSubscription;
     private SmmCatalogService $smmCatalog;
     private SmmPurchaseService $smmPurchase;
+    private StarPaymentService $starPayments;
 
     /**
      * @var array<int, string>
@@ -55,7 +57,8 @@ class BotKernel
         NumberCodeService $numberCodes,
         ForcedSubscriptionService $forcedSubscription,
         SmmCatalogService $smmCatalog,
-        SmmPurchaseService $smmPurchase
+        SmmPurchaseService $smmPurchase,
+        StarPaymentService $starPayments
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -69,12 +72,18 @@ class BotKernel
         $this->forcedSubscription = $forcedSubscription;
         $this->smmCatalog = $smmCatalog;
         $this->smmPurchase = $smmPurchase;
+        $this->starPayments = $starPayments;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
     }
 
     public function handle(array $update): void
     {
+        if (isset($update['pre_checkout_query'])) {
+            $this->handlePreCheckoutQuery($update['pre_checkout_query']);
+            return;
+        }
+
         if (isset($update['message'])) {
             $this->handleMessage($update['message']);
             return;
@@ -115,6 +124,11 @@ class BotKernel
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
         $changeLabel = $this->languages->label($userLang, 'change_language', 'Change Language');
+
+        if (isset($message['successful_payment'])) {
+            $this->handleSuccessfulPayment($message, $userDbId, $strings);
+            return;
+        }
 
         if (!$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
             return;
@@ -254,9 +268,16 @@ class BotKernel
             case 'usd':
                 $this->showNumbersList($chatId, $messageId, $strings, $backLabel, 0);
                 return;
+            case 'stars':
+                $this->showNumbersStarList($chatId, $messageId, $strings, $backLabel, 0);
+                return;
             case 'list':
                 $page = max(0, (int)($parts[2] ?? 0));
                 $this->showNumbersList($chatId, $messageId, $strings, $backLabel, $page);
+                return;
+            case 'starslist':
+                $page = max(0, (int)($parts[2] ?? 0));
+                $this->showNumbersStarList($chatId, $messageId, $strings, $backLabel, $page);
                 return;
             case 'country':
                 $code = $parts[2] ?? '';
@@ -285,6 +306,33 @@ class BotKernel
                     $strings
                 );
                 return;
+            case 'starscountry':
+                $code = $parts[2] ?? '';
+                if ($code === '') {
+                    $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+                    return;
+                }
+                $page = max(0, (int)($parts[3] ?? 0));
+                $this->showNumberStarDetails($chatId, $messageId, strtoupper($code), $page, $strings, $backLabel);
+                return;
+            case 'starsbuy':
+                $code = $parts[2] ?? '';
+                if ($code === '') {
+                    $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+                    return;
+                }
+                $page = max(0, (int)($parts[3] ?? 0));
+                $this->handleNumberStarPurchase(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $userDbId,
+                    $telegramUserId,
+                    strtoupper($code),
+                    $page,
+                    $strings
+                );
+                return;
             case 'code':
                 $orderId = (int)($parts[2] ?? 0);
                 $page = max(0, (int)($parts[3] ?? 0));
@@ -296,13 +344,6 @@ class BotKernel
                     $orderId,
                     $page,
                     $strings
-                );
-                return;
-            case 'stars':
-                $this->answerCallback(
-                    $callbackId,
-                    $strings['stars_disabled'] ?? 'Stars payments are not available right now.',
-                    true
                 );
                 return;
             default:
@@ -400,6 +441,91 @@ class BotKernel
     /**
      * @param array<string, string> $strings
      */
+    private function showNumbersStarList(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel,
+        int $page
+    ): void {
+        $payload = $this->numbersStarListPayload($strings, $backLabel, $page);
+        $this->editMessage($chatId, $messageId, $payload['text'], $payload['keyboard']);
+    }
+
+    private function numbersStarListPayload(array $strings, string $backLabel, int $page): array
+    {
+        $perPage = 6;
+        $pagination = $this->numberCatalog->paginate($page, $perPage);
+        $items = $pagination['items'];
+
+        $title = $strings['menu_purchase_stars'] ?? 'Buy Accounts (Stars)';
+        $text = $title;
+        if ($items === []) {
+            $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
+        } else {
+            $lines = array_map(
+                fn (array $country): string => $this->formatStarCountryLine($country),
+                $items
+            );
+            $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
+        }
+
+        $keyboard = [];
+        $row = [];
+        foreach ($items as $country) {
+            $row[] = [
+                'text' => sprintf(
+                    '%s • $%0.2f ≈ %d⭐️',
+                    $country['name'],
+                    $country['price_usd'],
+                    $this->convertUsdToStars((float)$country['price_usd'])
+                ),
+                'callback_data' => sprintf('numbers:starscountry:%s:%d', $country['code'], $page),
+            ];
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $keyboard[] = $row;
+        }
+
+        if ($page > 0 || $pagination['has_next']) {
+            $nav = [];
+            if ($page > 0) {
+                $nav[] = [
+                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'callback_data' => sprintf('numbers:starslist:%d', max(0, $page - 1)),
+                ];
+            }
+            if ($pagination['has_next']) {
+                $nav[] = [
+                    'text' => $strings['button_next'] ?? 'Next',
+                    'callback_data' => sprintf('numbers:starslist:%d', $page + 1),
+                ];
+            }
+            if ($nav !== []) {
+                $keyboard[] = $nav;
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $strings['main_numbers_button'] ?? 'Numbers', 'callback_data' => 'numbers:root'],
+        ];
+        $keyboard[] = [
+            ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+        ];
+
+        return [
+            'text' => $text,
+            'keyboard' => $keyboard,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
     private function showNumberDetails(
         int $chatId,
         int $messageId,
@@ -447,6 +573,126 @@ class BotKernel
     /**
      * @param array<string, string> $strings
      */
+    private function showNumberStarDetails(
+        int $chatId,
+        int $messageId,
+        string $countryCode,
+        int $page,
+        array $strings,
+        string $backLabel
+    ): void {
+        $country = $this->numberCatalog->find($countryCode);
+        if (!$country) {
+            $this->editMessage(
+                $chatId,
+                $messageId,
+                $this->numbersMenuText($strings),
+                $this->keyboardFactory->numbersMenu($strings, $backLabel)
+            );
+            return;
+        }
+
+        $priceUsd = (float)$country['price_usd'];
+        $stars = $this->convertUsdToStars($priceUsd);
+        $disclaimer = $strings['stars_purchase_disclaimer'] ?? 'Price: __p__ USD ≈ __s__⭐️';
+        $text = str_replace(
+            ['__c__', '__p__', '__s__'],
+            [$this->esc($country['name']), number_format($priceUsd, 2), (string)$stars],
+            $disclaimer
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['stars_invoice_button'] ?? 'Pay with Stars',
+                    'callback_data' => sprintf('numbers:starsbuy:%s:%d', $country['code'], $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $backLabel,
+                    'callback_data' => sprintf('numbers:starslist:%d', $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['main_menu'] ?? 'Main Menu',
+                    'callback_data' => 'back',
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleNumberStarPurchase(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $telegramUserId,
+        string $countryCode,
+        int $page,
+        array $strings
+    ): void {
+        $country = $this->numberCatalog->find($countryCode);
+        if (!$country) {
+            $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+            return;
+        }
+
+        try {
+            $invoice = $this->starPayments->createNumberInvoice(
+                $userDbId,
+                $telegramUserId,
+                $country,
+                (float)$country['price_usd'],
+                $strings
+            );
+        } catch (Throwable $e) {
+            $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+            return;
+        }
+
+        $priceUsd = number_format((float)$country['price_usd'], 2);
+        $text = $strings['stars_invoice_message'] ?? 'Price: __p__ USD ≈ __s__⭐️';
+        $text = str_replace(
+            ['__c__', '__p__', '__s__'],
+            [$this->esc($country['name']), $priceUsd, (string)$invoice['stars']],
+            $text
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['stars_invoice_button'] ?? 'Pay with Stars',
+                    'url' => $invoice['link'],
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['numbers_stars_button'] ?? 'Buy (Stars)',
+                    'callback_data' => sprintf('numbers:starslist:%d', $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['main_menu'] ?? 'Main Menu',
+                    'callback_data' => 'back',
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+        $this->answerCallback($callbackId, '✅');
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
     private function numberCountryText(array $strings, array $country): string
     {
         $title = sprintf('%s (%s)', $this->esc($country['name']), $this->esc($country['code']));
@@ -464,6 +710,27 @@ class BotKernel
             $this->esc($country['code']),
             $country['price_usd']
         );
+    }
+
+    private function formatStarCountryLine(array $country): string
+    {
+        return sprintf(
+            '%s (%s) • $%0.2f ≈ %d⭐️',
+            $this->esc($country['name']),
+            $this->esc($country['code']),
+            $country['price_usd'],
+            $this->convertUsdToStars((float)$country['price_usd'])
+        );
+    }
+
+    private function convertUsdToStars(float $price): int
+    {
+        $rate = $this->starPayments->usdPerStar();
+        if ($rate <= 0) {
+            return (int)$price;
+        }
+
+        return (int)max(1, ceil($price / $rate));
     }
 
     /**
@@ -499,6 +766,23 @@ class BotKernel
             return;
         }
 
+        $payload = $this->numberPurchaseSuccessPayload($strings, $country, $order, $page);
+        $this->editMessage($chatId, $messageId, $payload['text'], $payload['keyboard']);
+        $this->answerCallback($callbackId, '✅');
+    }
+
+    /**
+     * @param array<string, string> $strings
+     * @return array{text: string, keyboard: array<int, array<int, array<string, mixed>>>}
+     */
+    private function numberPurchaseSuccessPayload(
+        array $strings,
+        array $country,
+        array $order,
+        int $page,
+        string $mode = 'usd'
+    ): array
+    {
         $successTemplate = $strings['purchase_success'] ?? 'Purchase complete for __c__ number __num__ ($__p__)';
         $countryName = $this->esc($country['name']);
         $numberValue = $this->esc((string)$order['number']);
@@ -519,22 +803,35 @@ class BotKernel
                     'callback_data' => sprintf('numbers:code:%d:%d', $order['id'], $page),
                 ],
             ],
-            [
+        ];
+
+        if ($mode === 'stars') {
+            $keyboard[] = [
+                [
+                    'text' => $strings['numbers_stars_button'] ?? 'Buy (Stars)',
+                    'callback_data' => sprintf('numbers:starslist:%d', $page),
+                ],
+            ];
+        } else {
+            $keyboard[] = [
                 [
                     'text' => $strings['numbers_usd_button'] ?? 'Buy (USD)',
                     'callback_data' => sprintf('numbers:list:%d', $page),
                 ],
-            ],
+            ];
+        }
+
+        $keyboard[] = [
             [
-                [
-                    'text' => $strings['main_menu'] ?? 'Main Menu',
-                    'callback_data' => 'back',
-                ],
+                'text' => $strings['main_menu'] ?? 'Main Menu',
+                'callback_data' => 'back',
             ],
         ];
 
-        $this->editMessage($chatId, $messageId, $text, $keyboard);
-        $this->answerCallback($callbackId, '✅');
+        return [
+            'text' => $text,
+            'keyboard' => $keyboard,
+        ];
     }
 
     /**
@@ -561,16 +858,23 @@ class BotKernel
                 );
                 return;
             case 'usd':
-                $this->showSmmCategories($chatId, $messageId, $strings, $backLabel);
+                $this->setSmmPaymentMethod($userDbId, 'usd');
+                $this->showSmmCategories($chatId, $messageId, $strings, $backLabel, 'usd');
+                return;
+            case 'stars':
+                $this->setSmmPaymentMethod($userDbId, 'stars');
+                $this->showSmmCategories($chatId, $messageId, $strings, $backLabel, 'stars');
                 return;
             case 'cat':
                 $categoryId = (int)($parts[2] ?? 0);
-                $this->showSmmServices($chatId, $messageId, $categoryId, $strings, $backLabel, $callbackId);
+                $mode = $this->getSmmState($userDbId)['payment_method'] ?? 'usd';
+                $this->showSmmServices($chatId, $messageId, $categoryId, $strings, $backLabel, $callbackId, $mode);
                 return;
             case 'serv':
                 $serviceId = (int)($parts[2] ?? 0);
                 $categoryId = (int)($parts[3] ?? 0);
-                $this->showSmmServiceDetails($chatId, $messageId, $serviceId, $categoryId, $strings, $backLabel, $callbackId);
+                $mode = $this->getSmmState($userDbId)['payment_method'] ?? 'usd';
+                $this->showSmmServiceDetails($chatId, $messageId, $serviceId, $categoryId, $strings, $backLabel, $callbackId, $mode);
                 return;
             case 'link':
                 $serviceId = (int)($parts[2] ?? 0);
@@ -579,19 +883,20 @@ class BotKernel
                 return;
             case 'confirm':
                 $serviceId = (int)($parts[2] ?? 0);
-                $this->completeSmmOrder($chatId, $messageId, $callbackId, $userDbId, $serviceId, $strings);
+                $this->completeSmmOrder(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $userDbId,
+                    $telegramUserId,
+                    $serviceId,
+                    $strings
+                );
                 return;
             case 'cancel':
                 $this->clearSmmState($userDbId);
                 $this->sendMessage($chatId, $strings['smm_input_cancelled'] ?? 'Operation cancelled.', []);
                 $this->answerCallback($callbackId, '✅');
-                return;
-            case 'stars':
-                $this->answerCallback(
-                    $callbackId,
-                    $strings['stars_disabled'] ?? 'Stars option unavailable.',
-                    true
-                );
                 return;
             default:
                 $this->editMessage(
@@ -604,10 +909,18 @@ class BotKernel
         }
     }
 
-    private function showSmmCategories(int $chatId, int $messageId, array $strings, string $backLabel): void
+    private function showSmmCategories(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel,
+        string $mode = 'usd'
+    ): void
     {
         $categories = $this->smmCatalog->categories();
-        $text = $strings['smm_select_category'] ?? 'Select a category.';
+        $text = $mode === 'stars'
+            ? ($strings['smm_stars_button'] ?? 'Boost (Stars)')
+            : ($strings['smm_select_category'] ?? 'Select a category.');
 
         if ($categories === []) {
             $this->editMessage($chatId, $messageId, $text . PHP_EOL . ($strings['no_numbers'] ?? 'No data.'), [
@@ -646,7 +959,8 @@ class BotKernel
         int $categoryId,
         array $strings,
         string $backLabel,
-        ?string $callbackId = null
+        ?string $callbackId = null,
+        string $mode = 'usd'
     ): void {
         $services = $this->smmCatalog->servicesByCategory($categoryId);
         $category = $this->smmCatalog->category($categoryId);
@@ -655,7 +969,10 @@ class BotKernel
             return;
         }
 
-        $text = ($strings['smm_select_service'] ?? 'Select a service.') . PHP_EOL . $category['name'];
+        $label = $mode === 'stars'
+            ? ($strings['smm_stars_button'] ?? 'Boost (Stars)')
+            : ($strings['smm_select_service'] ?? 'Select a service.');
+        $text = $label . PHP_EOL . $category['name'];
         if ($services === []) {
             $text .= PHP_EOL . ($strings['no_numbers'] ?? 'No services available.');
             $keyboard = [
@@ -690,7 +1007,8 @@ class BotKernel
         int $categoryId,
         array $strings,
         string $backLabel,
-        ?string $callbackId = null
+        ?string $callbackId = null,
+        string $mode = 'usd'
     ): void {
         $service = $this->smmCatalog->service($serviceId);
         if (!$service) {
@@ -715,6 +1033,15 @@ class BotKernel
             $text .= $service['description'] . PHP_EOL;
         }
         $text .= $priceInfo;
+        if ($mode === 'stars') {
+            $starsLine = $strings['stars_price_perk'] ?? 'Approx Stars/1k: __s__⭐️';
+            $starsLine = str_replace(
+                '__s__',
+                (string)$this->convertUsdToStars((float)$service['rate_per_1k']),
+                $starsLine
+            );
+            $text .= PHP_EOL . $starsLine;
+        }
 
         $keyboard = [
             [
@@ -748,6 +1075,9 @@ class BotKernel
             return;
         }
 
+        $existing = $this->getSmmState($userDbId) ?? [];
+        $paymentMethod = $existing['payment_method'] ?? 'usd';
+
         $this->setSmmState($userDbId, [
             'state' => 'await_link',
             'service_id' => $serviceId,
@@ -760,6 +1090,8 @@ class BotKernel
             'link' => null,
             'quantity' => null,
             'price' => null,
+            'payment_method' => $paymentMethod,
+            'stars_amount' => null,
         ]);
 
         $this->answerCallback($callbackId, '✅');
@@ -771,12 +1103,74 @@ class BotKernel
         int $messageId,
         ?string $callbackId,
         int $userDbId,
+        int $telegramUserId,
         int $serviceId,
         array $strings
     ): void {
         $state = $this->getSmmState($userDbId);
         if (!$state || ($state['service_id'] ?? 0) !== $serviceId || ($state['state'] ?? '') !== 'await_confirm') {
             $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Nothing to confirm.', true);
+            return;
+        }
+
+        $paymentMethod = $state['payment_method'] ?? 'usd';
+        $service = $this->smmCatalog->service($serviceId);
+        if (!$service) {
+            $this->answerCallback($callbackId, $strings['smm_order_failed'] ?? 'Service unavailable.', true);
+            return;
+        }
+
+        if ($paymentMethod === 'stars') {
+            try {
+                $invoice = $this->starPayments->createSmmInvoice(
+                    $userDbId,
+                    $telegramUserId,
+                    $service,
+                    (string)$state['link'],
+                    (int)$state['quantity'],
+                    (float)$state['price'],
+                    $strings
+                );
+            } catch (Throwable $e) {
+                $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                return;
+            }
+
+            $text = $strings['stars_invoice_message'] ?? 'Price: __p__ USD ≈ __s__⭐️';
+            $text = str_replace(
+                ['__c__', '__p__', '__s__'],
+                [
+                    $this->esc($state['service_name'] ?? $service['name']),
+                    number_format((float)$state['price'], 2),
+                    (string)$invoice['stars'],
+                ],
+                $text
+            );
+
+            $keyboard = [
+                [
+                    [
+                        'text' => $strings['stars_invoice_button'] ?? 'Pay with Stars',
+                        'url' => $invoice['link'],
+                    ],
+                ],
+                [
+                    [
+                        'text' => $strings['smm_stars_button'] ?? 'Boost (Stars)',
+                        'callback_data' => 'smm:stars',
+                    ],
+                ],
+                [
+                    [
+                        'text' => $strings['main_menu'] ?? 'Main Menu',
+                        'callback_data' => 'back',
+                    ],
+                ],
+            ];
+
+            $this->clearSmmState($userDbId);
+            $this->editMessage($chatId, $messageId, $text, $keyboard);
+            $this->answerCallback($callbackId, '✅');
             return;
         }
 
@@ -925,6 +1319,11 @@ class BotKernel
                 $state['quantity'] = $quantity;
                 $state['price'] = $price;
                 $state['state'] = 'await_confirm';
+                if (($state['payment_method'] ?? 'usd') === 'stars') {
+                    $state['stars_amount'] = $this->convertUsdToStars($price);
+                } else {
+                    $state['stars_amount'] = null;
+                }
                 $this->setSmmState($userDbId, $state);
 
                 $summary = str_replace(
@@ -932,6 +1331,13 @@ class BotKernel
                     [$state['service_name'], (string)$quantity, number_format($price, 2)],
                     $strings['smm_order_summary'] ?? 'Service: __service__ / Qty: __quantity__ / Price: __price__$'
                 );
+                if (($state['payment_method'] ?? 'usd') === 'stars') {
+                    $summary .= PHP_EOL . str_replace(
+                        '__s__',
+                        (string)$state['stars_amount'],
+                        $strings['stars_price_total'] ?? 'Approx Stars: __s__⭐️'
+                    );
+                }
 
                 $keyboard = [
                     [
@@ -1081,9 +1487,187 @@ class BotKernel
         return false;
     }
 
+    /**
+     * @param array<string, mixed> $query
+     */
+    private function handlePreCheckoutQuery(array $query): void
+    {
+        $payload = (string)($query['invoice_payload'] ?? '');
+        $queryId = $query['id'] ?? null;
+
+        if (!$queryId) {
+            return;
+        }
+
+        $record = $payload !== '' ? $this->starPayments->findPending($payload) : null;
+        $ok = $record !== null;
+
+        $params = [
+            'pre_checkout_query_id' => $queryId,
+            'ok' => $ok,
+        ];
+
+        if (!$ok) {
+            $params['error_message'] = 'Payment request expired. Please initiate again.';
+        }
+
+        $this->telegram->call('answerPreCheckoutQuery', $params);
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     * @param array<string, string> $strings
+     */
+    private function handleSuccessfulPayment(array $message, int $userDbId, array $strings): void
+    {
+        $success = $message['successful_payment'] ?? null;
+        if (!$success) {
+            return;
+        }
+
+        $payload = (string)($success['invoice_payload'] ?? '');
+        if ($payload === '') {
+            return;
+        }
+
+        $record = $this->starPayments->findPending($payload);
+        if (!$record || ($record['status'] ?? 'pending') !== 'pending') {
+            return;
+        }
+
+        $this->starPayments->markCompleted($record, $success);
+
+        $meta = [];
+        if (!empty($record['meta'])) {
+            $decoded = json_decode((string)$record['meta'], true);
+            if (is_array($decoded)) {
+                $meta = $decoded;
+            }
+        }
+
+        $chatId = (int)($message['chat']['id'] ?? 0);
+        if ($chatId === 0) {
+            return;
+        }
+
+        $targetUserId = (int)($record['user_id'] ?? $userDbId);
+
+        switch ($record['type']) {
+            case 'number':
+                $this->finalizeStarNumberPayment($chatId, $targetUserId, $record, $meta, $strings);
+                break;
+            case 'smm':
+                $this->finalizeStarSmmPayment($chatId, $targetUserId, $record, $meta, $strings);
+                break;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $record
+     * @param array<string, mixed> $meta
+     * @param array<string, string> $strings
+     */
+    private function finalizeStarNumberPayment(
+        int $chatId,
+        int $userDbId,
+        array $record,
+        array $meta,
+        array $strings
+    ): void {
+        $countryCode = strtoupper((string)($meta['country_code'] ?? ''));
+        if ($countryCode === '') {
+            $this->sendMessage($chatId, $strings['purchase_failed'] ?? 'Purchase failed.', []);
+            return;
+        }
+
+        try {
+            $order = $this->numberPurchase->purchaseWithStars(
+                $userDbId,
+                (int)$record['telegram_user_id'],
+                $countryCode,
+                (int)$record['stars_amount'],
+                (float)$record['price_usd']
+            );
+        } catch (Throwable $e) {
+            $this->sendMessage($chatId, $strings['purchase_failed'] ?? 'Purchase failed.', []);
+            return;
+        }
+
+        $country = $this->numberCatalog->find($countryCode) ?? [
+            'code' => $countryCode,
+            'name' => $meta['country_name'] ?? $countryCode,
+            'price_usd' => $order['price_usd'],
+        ];
+
+        $payload = $this->numberPurchaseSuccessPayload($strings, $country, $order, 0, 'stars');
+        $this->sendMessage($chatId, $payload['text'], $payload['keyboard']);
+    }
+
+    /**
+     * @param array<string, mixed> $record
+     * @param array<string, mixed> $meta
+     * @param array<string, string> $strings
+     */
+    private function finalizeStarSmmPayment(
+        int $chatId,
+        int $userDbId,
+        array $record,
+        array $meta,
+        array $strings
+    ): void {
+        $serviceId = (int)($meta['service_id'] ?? 0);
+        $service = $this->smmCatalog->service($serviceId);
+        if (!$service) {
+            $this->sendMessage($chatId, $strings['smm_order_failed'] ?? 'Order failed.', []);
+            return;
+        }
+
+        try {
+            $order = $this->smmPurchase->purchaseWithStars(
+                $userDbId,
+                $service,
+                (string)$meta['link'],
+                (int)$meta['quantity'],
+                (float)$record['price_usd'],
+                (int)$record['stars_amount']
+            );
+        } catch (Throwable $e) {
+            $this->sendMessage($chatId, $strings['smm_order_failed'] ?? 'Order failed.', []);
+            return;
+        }
+
+        $this->clearSmmState($userDbId);
+
+        $text = ($strings['smm_order_success'] ?? 'Order placed.') . PHP_EOL;
+        $text .= sprintf(
+            "%s\n%s",
+            $service['name'],
+            sprintf('ID: %s', $order['provider_order_id'] ?? '-')
+        );
+
+        $keyboard = [
+            [
+                ['text' => $strings['smm_stars_button'] ?? 'Boost (Stars)', 'callback_data' => 'smm:stars'],
+            ],
+            [
+                ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+            ],
+        ];
+
+        $this->sendMessage($chatId, $text, $keyboard);
+    }
+
     private function getSmmState(int $userId): ?array
     {
         return $this->smmFlow[$userId] ?? null;
+    }
+
+    private function setSmmPaymentMethod(int $userId, string $method): void
+    {
+        $state = $this->getSmmState($userId) ?? [];
+        $state['payment_method'] = $method;
+        $state['state'] = 'select_category';
+        $this->setSmmState($userId, $state);
     }
 
     private function setSmmState(int $userId, array $state): void

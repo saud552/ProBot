@@ -89,4 +89,49 @@ class NumberPurchaseService
             throw $e;
         }
     }
+
+    public function purchaseWithStars(
+        int $userId,
+        int $telegramUserId,
+        string $countryCode,
+        int $starsAmount,
+        float $priceUsd
+    ): array {
+        $country = $this->catalog->find($countryCode);
+        if (!$country) {
+            throw new RuntimeException('Country not available.');
+        }
+
+        $numberData = $this->provider->requestNumber($countryCode);
+
+        $order = $this->orders->create([
+            'user_id' => $userId,
+            'country_code' => $country['code'],
+            'provider_id' => $country['provider_id'],
+            'number' => $numberData['number'],
+            'hash_code' => $numberData['hash_code'],
+            'price_usd' => $priceUsd,
+            'currency' => 'USD',
+            'status' => 'purchased',
+            'metadata' => [],
+        ]);
+
+        $this->transactions->log(
+            $userId,
+            'debit',
+            'stars',
+            (float)$starsAmount,
+            'XTR',
+            (string)$order['id'],
+            [
+                'action' => 'number_purchase',
+                'country' => $country['code'],
+                'usd_equivalent' => $priceUsd,
+            ]
+        );
+
+        $this->notifications->notifyPurchase($order, $country, $telegramUserId);
+
+        return $order;
+    }
 }

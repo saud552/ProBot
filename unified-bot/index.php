@@ -8,6 +8,7 @@ use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
+use App\Domain\Payments\StarPaymentService;
 use App\Domain\Notifications\NotificationService;
 use App\Domain\Settings\ForcedSubscriptionService;
 use App\Domain\Settings\SettingsService;
@@ -24,6 +25,7 @@ use App\Infrastructure\Repository\ServiceCategoryRepository;
 use App\Infrastructure\Repository\ServiceRepository;
 use App\Infrastructure\Repository\SmmOrderRepository;
 use App\Infrastructure\Repository\TicketRepository;
+use App\Infrastructure\Repository\StarPaymentRepository;
 use App\Infrastructure\Repository\TransactionRepository;
 use App\Infrastructure\Repository\UserRepository;
 use App\Infrastructure\Repository\WalletRepository;
@@ -55,6 +57,7 @@ $ticketRepository = new TicketRepository($connection);
 $serviceCategoryRepository = new ServiceCategoryRepository($connection);
 $serviceRepository = new ServiceRepository($connection);
 $smmOrderRepository = new SmmOrderRepository($connection);
+$starPaymentRepository = new StarPaymentRepository($connection);
 $userManager = new UserManager($userRepository);
 $wallets = new WalletService($walletRepository);
 $numberCatalog = new NumberCatalogService($countryRepository);
@@ -88,6 +91,11 @@ $smmPurchase = new SmmPurchaseService(
     $smmProvider,
     $smmOrderRepository
 );
+$starPayments = new StarPaymentService(
+    $starPaymentRepository,
+    $settingsService,
+    $telegram
+);
 
 $kernel = new BotKernel(
     $languages,
@@ -101,7 +109,8 @@ $kernel = new BotKernel(
     $numberCodes,
     $forcedSubscription,
     $smmCatalog,
-    $smmPurchase
+    $smmPurchase,
+    $starPayments
 );
 
 $payload = file_get_contents('php://input');

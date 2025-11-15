@@ -55,6 +55,38 @@ class SmmPurchaseService
 
         $this->wallets->debit($userId, $price, $service['currency']);
 
+        return $this->placeOrder($userId, $service, $link, $quantity, $price, function () use ($userId, $price, $service) {
+            $this->wallets->credit($userId, $price, $service['currency']);
+        });
+    }
+
+    public function purchaseWithStars(
+        int $userId,
+        array $service,
+        string $link,
+        int $quantity,
+        float $priceUsd,
+        int $starsAmount
+    ): array {
+        return $this->placeOrder($userId, $service, $link, $quantity, $priceUsd, null, [
+            'type' => 'stars',
+            'amount' => $starsAmount,
+        ]);
+    }
+
+    /**
+     * @param callable|null $onFailure
+     * @param array<string, mixed>|null $starsMeta
+     */
+    private function placeOrder(
+        int $userId,
+        array $service,
+        string $link,
+        int $quantity,
+        float $price,
+        ?callable $onFailure = null,
+        ?array $starsMeta = null
+    ): array {
         try {
             $providerResponse = $this->provider->placeOrder([
                 'service' => $service['provider_code'],
@@ -74,22 +106,33 @@ class SmmPurchaseService
                 'meta' => [],
             ]);
 
+            $method = $starsMeta ? 'stars' : 'smm_purchase';
+            $amount = $starsMeta['amount'] ?? $price;
+            $currency = $starsMeta ? 'XTR' : $service['currency'];
+
+            $meta = [
+                'service' => $service['name'],
+                'provider_order_id' => $providerResponse['provider_order_id'],
+            ];
+            if ($starsMeta) {
+                $meta['usd_equivalent'] = $price;
+            }
+
             $this->transactions->log(
                 $userId,
                 'debit',
-                'smm_purchase',
-                $price,
-                $service['currency'],
+                $method,
+                $amount,
+                $currency,
                 (string)$order['id'],
-                [
-                    'service' => $service['name'],
-                    'provider_order_id' => $providerResponse['provider_order_id'],
-                ]
+                $meta
             );
 
             return $order;
         } catch (Throwable $e) {
-            $this->wallets->credit($userId, $price, $service['currency']);
+            if ($onFailure) {
+                $onFailure();
+            }
             throw $e;
         }
     }

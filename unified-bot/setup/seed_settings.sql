@@ -20,5 +20,11 @@ INSERT INTO settings (`key`, `value`) VALUES
         'success_channel_id', -1003397685474,
         'support_channel_id', -1002991395093
     )
+),
+(
+    'stars',
+    JSON_OBJECT(
+        'usd_per_star', 0.011
+    )
 )
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP;
