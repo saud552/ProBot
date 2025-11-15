@@ -1,0 +1,72 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Infrastructure\Repository;
+
+use PDOException;
+use RuntimeException;
+
+class UserRepository extends Repository
+{
+    public function findByTelegramId(int $telegramId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE telegram_id = :telegram_id LIMIT 1');
+        $stmt->execute(['telegram_id' => $telegramId]);
+        $user = $stmt->fetch();
+
+        return $user ?: null;
+    }
+
+    public function create(int $telegramId, string $languageCode): array
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO users (telegram_id, language_code) VALUES (:telegram_id, :language_code)'
+        );
+        $stmt->execute([
+            'telegram_id' => $telegramId,
+            'language_code' => $languageCode,
+        ]);
+
+        return $this->findByTelegramId($telegramId)
+            ?? throw new RuntimeException('Failed to create user record.');
+    }
+
+    public function updateLanguage(int $userId, string $languageCode): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE users SET language_code = :language WHERE id = :id');
+        $stmt->execute([
+            'language' => $languageCode,
+            'id' => $userId,
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $profile
+     */
+    public function upsertProfile(int $userId, array $profile): void
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO profiles (user_id, first_name, username, referrer_id, last_seen_at)
+             VALUES (:user_id, :first_name, :username, :referrer_id, NOW())
+             ON DUPLICATE KEY UPDATE
+                 first_name = VALUES(first_name),
+                 username = VALUES(username),
+                 referrer_id = VALUES(referrer_id),
+                 last_seen_at = VALUES(last_seen_at)'
+        );
+
+        $stmt->execute([
+            'user_id' => $userId,
+            'first_name' => $profile['first_name'] ?? null,
+            'username' => $profile['username'] ?? null,
+            'referrer_id' => $profile['referrer_id'] ?? null,
+        ]);
+    }
+
+    public function markLastSeen(int $userId): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE profiles SET last_seen_at = NOW() WHERE user_id = :user_id');
+        $stmt->execute(['user_id' => $userId]);
+    }
+}
