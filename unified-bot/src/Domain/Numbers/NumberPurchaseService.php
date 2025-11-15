@@ -7,6 +7,7 @@ namespace App\Domain\Numbers;
 use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Repository\NumberOrderRepository;
 use RuntimeException;
+use Throwable;
 
 class NumberPurchaseService
 {
@@ -43,20 +44,24 @@ class NumberPurchaseService
         }
 
         $this->wallets->debit($userId, $price, 'USD');
-        $numberData = $this->provider->requestNumber($countryCode);
 
-        $order = $this->orders->create([
-            'user_id' => $userId,
-            'country_code' => $country['code'],
-            'provider_id' => $country['provider_id'],
-            'number' => $numberData['number'],
-            'hash_code' => $numberData['hash_code'],
-            'price_usd' => $price,
-            'currency' => 'USD',
-            'status' => 'purchased',
-            'metadata' => [],
-        ]);
+        try {
+            $numberData = $this->provider->requestNumber($countryCode);
 
-        return $order;
+            return $this->orders->create([
+                'user_id' => $userId,
+                'country_code' => $country['code'],
+                'provider_id' => $country['provider_id'],
+                'number' => $numberData['number'],
+                'hash_code' => $numberData['hash_code'],
+                'price_usd' => $price,
+                'currency' => 'USD',
+                'status' => 'purchased',
+                'metadata' => [],
+            ]);
+        } catch (Throwable $e) {
+            $this->wallets->credit($userId, $price, 'USD');
+            throw $e;
+        }
     }
 }

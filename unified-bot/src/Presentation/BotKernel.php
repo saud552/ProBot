@@ -12,6 +12,8 @@ use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Storage\JsonStore;
 use App\Infrastructure\Telegram\TelegramClient;
 use App\Presentation\Keyboard\KeyboardFactory;
+use RuntimeException;
+use Throwable;
 
 class BotKernel
 {
@@ -112,55 +114,42 @@ class BotKernel
         $message = $callback['message'] ?? [];
         $chatId = (int)($message['chat']['id'] ?? 0);
         $messageId = (int)($message['message_id'] ?? 0);
-        $user = $callback['from'] ?? [];
-        $userId = (int)($user['id'] ?? 0);
+        $telegramUser = $callback['from'] ?? [];
+        $userId = (int)($telegramUser['id'] ?? 0);
 
         if ($chatId === 0 || $messageId === 0 || $userId === 0) {
             return;
         }
 
-        $userRecord = $this->userManager->findByTelegramId($userId);
-        if ($userRecord) {
-            $userLang = $this->languages->ensure($userRecord['language_code'] ?? 'ar');
-            $this->cacheLanguage($userId, $userLang);
-        } else {
-            $userLang = $this->determineLanguage($userId, (string)($user['language_code'] ?? 'ar'));
-        }
+        $userRecord = $this->userManager->sync([
+            'telegram_id' => $userId,
+            'language_code' => $telegramUser['language_code'] ?? 'ar',
+            'first_name' => $telegramUser['first_name'] ?? null,
+            'username' => $telegramUser['username'] ?? null,
+        ]);
+        $this->wallets->ensure((int)$userRecord['id'], 'USD');
+
+        $userLang = $this->languages->ensure($userRecord['language_code'] ?? ($telegramUser['language_code'] ?? 'ar'));
+        $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
         $changeLabel = $this->languages->label($userLang, 'change_language', 'Change Language');
         $backLabel = $this->languages->label($userLang, 'back', 'Back');
+        $callbackId = $callback['id'] ?? null;
+        $userDbId = (int)$userRecord['id'];
+
+        $parts = explode(':', $data);
+        if (($parts[0] ?? '') === 'numbers') {
+            $this->handleNumbersCallback($chatId, $messageId, $callbackId, $userDbId, $parts, $strings, $backLabel);
+            return;
+        }
 
         switch ($data) {
-            case 'numbers:root':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $this->numbersMenuText($strings),
-                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
-                );
-                break;
             case 'smm:root':
                 $this->editMessage(
                     $chatId,
                     $messageId,
                     $strings['menu_purchase'] ?? 'Boosting',
                     $this->keyboardFactory->smmMenu($strings, $backLabel)
-                );
-                break;
-            case 'numbers:usd':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $this->numbersMenuText($strings, $strings['numbers_usd_button'] ?? 'Buy with USD'),
-                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
-                );
-                break;
-            case 'numbers:stars':
-                $this->editMessage(
-                    $chatId,
-                    $messageId,
-                    $this->numbersMenuText($strings, $strings['numbers_stars_button'] ?? 'Buy with Stars'),
-                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
                 );
                 break;
             case 'smm:usd':
@@ -196,6 +185,293 @@ class BotKernel
                 );
                 break;
         }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleNumbersCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'root';
+        switch ($action) {
+            case 'root':
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    $this->numbersMenuText($strings),
+                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                );
+                return;
+            case 'usd':
+                $this->showNumbersList($chatId, $messageId, $strings, $backLabel, 0);
+                return;
+            case 'list':
+                $page = max(0, (int)($parts[2] ?? 0));
+                $this->showNumbersList($chatId, $messageId, $strings, $backLabel, $page);
+                return;
+            case 'country':
+                $code = $parts[2] ?? '';
+                if ($code === '') {
+                    $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+                    return;
+                }
+                $page = max(0, (int)($parts[3] ?? 0));
+                $this->showNumberDetails($chatId, $messageId, strtoupper($code), $page, $strings, $backLabel);
+                return;
+            case 'buy':
+                $code = $parts[2] ?? '';
+                if ($code === '') {
+                    $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+                    return;
+                }
+                $page = max(0, (int)($parts[3] ?? 0));
+                $this->handleNumberPurchaseAction(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $userDbId,
+                    strtoupper($code),
+                    $page,
+                    $strings
+                );
+                return;
+            case 'stars':
+                $this->answerCallback(
+                    $callbackId,
+                    $strings['stars_disabled'] ?? 'Stars payments are not available right now.',
+                    true
+                );
+                return;
+            default:
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    $this->numbersMenuText($strings),
+                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                );
+        }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showNumbersList(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel,
+        int $page
+    ): void {
+        $payload = $this->numbersListPayload($strings, $backLabel, $page);
+        $this->editMessage($chatId, $messageId, $payload['text'], $payload['keyboard']);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function numbersListPayload(array $strings, string $backLabel, int $page): array
+    {
+        $perPage = 6;
+        $pagination = $this->numberCatalog->paginate($page, $perPage);
+        $items = $pagination['items'];
+
+        $text = $this->numbersMenuText($strings, $strings['numbers_usd_button'] ?? 'Buy with USD');
+        if ($items === []) {
+            $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
+        } else {
+            $lines = array_map(
+                fn (array $country): string => $this->formatCountryLine($country),
+                $items
+            );
+            $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
+        }
+
+        $keyboard = [];
+        $row = [];
+        foreach ($items as $country) {
+            $row[] = [
+                'text' => sprintf('%s • $%0.2f', $country['name'], $country['price_usd']),
+                'callback_data' => sprintf('numbers:country:%s:%d', $country['code'], $page),
+            ];
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $keyboard[] = $row;
+        }
+
+        if ($page > 0 || $pagination['has_next']) {
+            $nav = [];
+            if ($page > 0) {
+                $nav[] = [
+                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'callback_data' => sprintf('numbers:list:%d', max(0, $page - 1)),
+                ];
+            }
+            if ($pagination['has_next']) {
+                $nav[] = [
+                    'text' => $strings['button_next'] ?? 'Next',
+                    'callback_data' => sprintf('numbers:list:%d', $page + 1),
+                ];
+            }
+            if ($nav !== []) {
+                $keyboard[] = $nav;
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $strings['main_numbers_button'] ?? 'Numbers', 'callback_data' => 'numbers:root'],
+        ];
+        $keyboard[] = [
+            ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+        ];
+
+        return [
+            'text' => $text,
+            'keyboard' => $keyboard,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showNumberDetails(
+        int $chatId,
+        int $messageId,
+        string $countryCode,
+        int $page,
+        array $strings,
+        string $backLabel
+    ): void {
+        $country = $this->numberCatalog->find($countryCode);
+        if (!$country) {
+            $this->editMessage(
+                $chatId,
+                $messageId,
+                $this->numbersMenuText($strings),
+                $this->keyboardFactory->numbersMenu($strings, $backLabel)
+            );
+            return;
+        }
+
+        $text = $this->numberCountryText($strings, $country);
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['confirm_purchase'] ?? 'Confirm Purchase',
+                    'callback_data' => sprintf('numbers:buy:%s:%d', $country['code'], $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $backLabel,
+                    'callback_data' => sprintf('numbers:list:%d', $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['main_menu'] ?? 'Main Menu',
+                    'callback_data' => 'back',
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function numberCountryText(array $strings, array $country): string
+    {
+        $title = sprintf('%s (%s)', $this->esc($country['name']), $this->esc($country['code']));
+        $priceLine = sprintf('%s: $%0.2f', $strings['numbers_usd_button'] ?? 'USD Price', $country['price_usd']);
+        $disclaimer = $strings['disclaimer'] ?? 'By confirming you accept the purchase terms.';
+
+        return $title . PHP_EOL . $priceLine . PHP_EOL . PHP_EOL . $disclaimer;
+    }
+
+    private function formatCountryLine(array $country): string
+    {
+        return sprintf(
+            '%s (%s) • $%0.2f',
+            $this->esc($country['name']),
+            $this->esc($country['code']),
+            $country['price_usd']
+        );
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleNumberPurchaseAction(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        string $countryCode,
+        int $page,
+        array $strings
+    ): void {
+        $country = $this->numberCatalog->find($countryCode);
+        if (!$country) {
+            $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
+            return;
+        }
+
+        try {
+            $order = $this->numberPurchase->purchaseWithUsd($userDbId, $countryCode);
+        } catch (RuntimeException $e) {
+            $message = $strings['purchase_failed'] ?? 'Purchase could not be completed.';
+            if (stripos($e->getMessage(), 'Insufficient balance') !== false) {
+                $message = $strings['insufficient_balance'] ?? 'Insufficient balance.';
+            }
+            $this->answerCallback($callbackId, $message, true);
+            return;
+        } catch (Throwable $e) {
+            $this->answerCallback($callbackId, $strings['purchase_failed'] ?? 'Purchase failed.', true);
+            return;
+        }
+
+        $successTemplate = $strings['purchase_success'] ?? 'Purchase complete for __c__ number __num__ ($__p__)';
+        $countryName = $this->esc($country['name']);
+        $numberValue = $this->esc((string)$order['number']);
+        $priceValue = number_format((float)$order['price_usd'], 2);
+        $text = str_replace(
+            ['__c__', '__num__', '__p__'],
+            [$countryName, $numberValue, $priceValue],
+            $successTemplate
+        );
+
+        $text .= PHP_EOL . 'Hash: <code>' . htmlspecialchars((string)$order['hash_code'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        $text .= PHP_EOL . ($strings['request_code'] ?? 'Use the request code option when you are ready.');
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['numbers_usd_button'] ?? 'Buy (USD)',
+                    'callback_data' => sprintf('numbers:list:%d', $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['main_menu'] ?? 'Main Menu',
+                    'callback_data' => 'back',
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+        $this->answerCallback($callbackId, '✅');
     }
 
     private function determineLanguage(int $userId, string $preferred): string
@@ -235,10 +511,10 @@ class BotKernel
 
         $preview = array_slice($countries, 0, 5);
         $lines = array_map(
-            static fn (array $country): string => sprintf(
+            fn (array $country): string => sprintf(
                 '%s (%s) • $%0.2f',
-                $country['name'],
-                $country['code'],
+                $this->esc($country['name']),
+                $this->esc($country['code']),
                 $country['price_usd']
             ),
             $preview
@@ -276,5 +552,23 @@ class BotKernel
                 'inline_keyboard' => $keyboard,
             ]),
         ]);
+    }
+
+    private function answerCallback(?string $callbackId, string $text, bool $alert = false): void
+    {
+        if (!$callbackId) {
+            return;
+        }
+
+        $this->telegram->call('answerCallbackQuery', [
+            'callback_query_id' => $callbackId,
+            'text' => $text,
+            'show_alert' => $alert,
+        ]);
+    }
+
+    private function esc(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 }
