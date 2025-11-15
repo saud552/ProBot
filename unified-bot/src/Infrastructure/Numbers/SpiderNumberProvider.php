@@ -62,4 +62,43 @@ class SpiderNumberProvider implements NumberProviderInterface
             'hash_code' => $result['hash_code'] ?? '',
         ];
     }
+
+    /**
+     * @return array{code: string, password: string}
+     */
+    public function requestCode(string $hashCode): array
+    {
+        $query = http_build_query([
+            'apiKey' => $this->apiKey,
+            'action' => 'getCode',
+            'hash_code' => $hashCode,
+        ]);
+        $url = "{$this->baseUrl}?{$query}";
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException("Spider request failed: {$error}");
+        }
+        curl_close($ch);
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded) || ($decoded['error'] ?? '') !== 'INFORMATION_SUCCESS') {
+            throw new RuntimeException('Code not ready yet.');
+        }
+
+        $result = $decoded['result'] ?? [];
+        return [
+            'code' => $result['code'] ?? '',
+            'password' => $result['password'] ?? '',
+        ];
+    }
 }

@@ -6,7 +6,9 @@ namespace App\Presentation;
 
 use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
+use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
+use App\Domain\Settings\ForcedSubscriptionService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Storage\JsonStore;
@@ -25,6 +27,8 @@ class BotKernel
     private WalletService $wallets;
     private NumberCatalogService $numberCatalog;
     private NumberPurchaseService $numberPurchase;
+    private NumberCodeService $numberCodes;
+    private ForcedSubscriptionService $forcedSubscription;
 
     /**
      * @var array<int, string>
@@ -39,7 +43,9 @@ class BotKernel
         UserManager $userManager,
         WalletService $wallets,
         NumberCatalogService $numberCatalog,
-        NumberPurchaseService $numberPurchase
+        NumberPurchaseService $numberPurchase,
+        NumberCodeService $numberCodes,
+        ForcedSubscriptionService $forcedSubscription
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -49,6 +55,8 @@ class BotKernel
         $this->wallets = $wallets;
         $this->numberCatalog = $numberCatalog;
         $this->numberPurchase = $numberPurchase;
+        $this->numberCodes = $numberCodes;
+        $this->forcedSubscription = $forcedSubscription;
         $this->languageCache = $this->store->load('langs', []);
     }
 
@@ -91,6 +99,10 @@ class BotKernel
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
         $changeLabel = $this->languages->label($userLang, 'change_language', 'Change Language');
+
+        if (!$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
+            return;
+        }
 
         if ($text === '/start') {
             $this->sendMessage($chatId, $strings['welcome'] ?? 'Welcome', $this->keyboardFactory->mainMenu($strings, $changeLabel));
@@ -136,10 +148,24 @@ class BotKernel
         $backLabel = $this->languages->label($userLang, 'back', 'Back');
         $callbackId = $callback['id'] ?? null;
         $userDbId = (int)$userRecord['id'];
+        $telegramUserId = (int)$userRecord['telegram_id'];
+
+        if (!$this->enforceSubscription($chatId, $telegramUserId, $strings, $callbackId)) {
+            return;
+        }
 
         $parts = explode(':', $data);
         if (($parts[0] ?? '') === 'numbers') {
-            $this->handleNumbersCallback($chatId, $messageId, $callbackId, $userDbId, $parts, $strings, $backLabel);
+            $this->handleNumbersCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $telegramUserId,
+                $parts,
+                $strings,
+                $backLabel
+            );
             return;
         }
 
@@ -195,6 +221,7 @@ class BotKernel
         int $messageId,
         ?string $callbackId,
         int $userDbId,
+        int $telegramUserId,
         array $parts,
         array $strings,
         string $backLabel
@@ -237,7 +264,21 @@ class BotKernel
                     $messageId,
                     $callbackId,
                     $userDbId,
+                    $telegramUserId,
                     strtoupper($code),
+                    $page,
+                    $strings
+                );
+                return;
+            case 'code':
+                $orderId = (int)($parts[2] ?? 0);
+                $page = max(0, (int)($parts[3] ?? 0));
+                $this->handleNumberCodeAction(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $userDbId,
+                    $orderId,
                     $page,
                     $strings
                 );
@@ -418,6 +459,7 @@ class BotKernel
         int $messageId,
         ?string $callbackId,
         int $userDbId,
+        int $telegramUserId,
         string $countryCode,
         int $page,
         array $strings
@@ -429,7 +471,7 @@ class BotKernel
         }
 
         try {
-            $order = $this->numberPurchase->purchaseWithUsd($userDbId, $countryCode);
+            $order = $this->numberPurchase->purchaseWithUsd($userDbId, $telegramUserId, $countryCode);
         } catch (RuntimeException $e) {
             $message = $strings['purchase_failed'] ?? 'Purchase could not be completed.';
             if (stripos($e->getMessage(), 'Insufficient balance') !== false) {
@@ -454,6 +496,77 @@ class BotKernel
 
         $text .= PHP_EOL . 'Hash: <code>' . htmlspecialchars((string)$order['hash_code'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
         $text .= PHP_EOL . ($strings['request_code'] ?? 'Use the request code option when you are ready.');
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['request_code'] ?? 'Request Code',
+                    'callback_data' => sprintf('numbers:code:%d:%d', $order['id'], $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['numbers_usd_button'] ?? 'Buy (USD)',
+                    'callback_data' => sprintf('numbers:list:%d', $page),
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['main_menu'] ?? 'Main Menu',
+                    'callback_data' => 'back',
+                ],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+        $this->answerCallback($callbackId, '✅');
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleNumberCodeAction(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $orderId,
+        int $page,
+        array $strings
+    ): void {
+        if ($orderId <= 0) {
+            $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Order not found.', true);
+            return;
+        }
+
+        try {
+            $result = $this->numberCodes->retrieveCode($userDbId, $orderId);
+        } catch (RuntimeException $e) {
+            $this->answerCallback($callbackId, $e->getMessage(), true);
+            return;
+        }
+
+        $order = $result['order'];
+        $codeData = $result['code'];
+
+        $countryCode = strtoupper((string)$order['country_code']);
+        $country = $this->numberCatalog->find($countryCode) ?? [
+            'name' => $order['country_code'],
+            'code' => $order['country_code'],
+        ];
+
+        $template = $strings['code_received'] ?? 'Code: __code__';
+        $text = str_replace(
+            ['__num__', '__p__', '__c__', '__code__', '__pass__'],
+            [
+                $this->esc((string)$order['number']),
+                number_format((float)$order['price_usd'], 2),
+                $this->esc($country['name']),
+                $this->esc((string)$codeData['code']),
+                $this->esc((string)$codeData['password']),
+            ],
+            $template
+        );
 
         $keyboard = [
             [
@@ -570,5 +683,35 @@ class BotKernel
     private function esc(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /**
+     * @param array<string, mixed> $strings
+     */
+    private function enforceSubscription(
+        int $chatId,
+        int $telegramUserId,
+        array $strings,
+        ?string $callbackId = null
+    ): bool {
+        $result = $this->forcedSubscription->validate($telegramUserId, $strings);
+        if ($result['allowed'] ?? false) {
+            return true;
+        }
+
+        if ($callbackId) {
+            $this->answerCallback($callbackId, $strings['subscription_not_verified'] ?? 'Subscription required.', true);
+        }
+
+        $this->telegram->call('sendMessage', [
+            'chat_id' => $chatId,
+            'text' => $result['message'] ?? ($strings['verify_text'] ?? 'Please join the channel to continue.'),
+            'parse_mode' => 'HTML',
+            'reply_markup' => json_encode([
+                'inline_keyboard' => $result['keyboard'] ?? [],
+            ]),
+        ]);
+
+        return false;
     }
 }

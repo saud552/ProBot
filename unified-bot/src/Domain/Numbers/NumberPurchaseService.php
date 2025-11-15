@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Numbers;
 
+use App\Domain\Notifications\NotificationService;
+use App\Domain\Wallet\TransactionService;
 use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Repository\NumberOrderRepository;
 use RuntimeException;
@@ -15,23 +17,29 @@ class NumberPurchaseService
     private WalletService $wallets;
     private NumberProviderInterface $provider;
     private NumberOrderRepository $orders;
+    private NotificationService $notifications;
+    private TransactionService $transactions;
 
     public function __construct(
         NumberCatalogService $catalog,
         WalletService $wallets,
         NumberProviderInterface $provider,
-        NumberOrderRepository $orders
+        NumberOrderRepository $orders,
+        NotificationService $notifications,
+        TransactionService $transactions
     ) {
         $this->catalog = $catalog;
         $this->wallets = $wallets;
         $this->provider = $provider;
         $this->orders = $orders;
+        $this->notifications = $notifications;
+        $this->transactions = $transactions;
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function purchaseWithUsd(int $userId, string $countryCode): array
+    public function purchaseWithUsd(int $userId, int $telegramUserId, string $countryCode): array
     {
         $country = $this->catalog->find($countryCode);
         if (!$country) {
@@ -48,7 +56,7 @@ class NumberPurchaseService
         try {
             $numberData = $this->provider->requestNumber($countryCode);
 
-            return $this->orders->create([
+            $order = $this->orders->create([
                 'user_id' => $userId,
                 'country_code' => $country['code'],
                 'provider_id' => $country['provider_id'],
@@ -59,6 +67,23 @@ class NumberPurchaseService
                 'status' => 'purchased',
                 'metadata' => [],
             ]);
+
+            $this->transactions->log(
+                $userId,
+                'debit',
+                'purchase',
+                $price,
+                'USD',
+                (string)$order['id'],
+                [
+                    'action' => 'number_purchase',
+                    'country' => $country['code'],
+                ]
+            );
+
+            $this->notifications->notifyPurchase($order, $country, $telegramUserId);
+
+            return $order;
         } catch (Throwable $e) {
             $this->wallets->credit($userId, $price, 'USD');
             throw $e;
