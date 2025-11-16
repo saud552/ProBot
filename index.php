@@ -20,6 +20,7 @@ use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Domain\Wallet\TransactionService;
 use App\Infrastructure\Database\Connection;
+use App\Infrastructure\Database\SchemaManager;
 use App\Infrastructure\Numbers\SpiderNumberProvider;
 use App\Infrastructure\Repository\NumberCountryRepository;
 use App\Infrastructure\Repository\NumberOrderRepository;
@@ -43,6 +44,11 @@ $telegramConfig = require APP_BASE_PATH . '/config/telegram.php';
 $databaseConfig = require APP_BASE_PATH . '/config/database.php';
 $providersConfig = require APP_BASE_PATH . '/config/providers.php';
 $connection = new Connection($databaseConfig);
+SchemaManager::ensure(
+    $connection->pdo(),
+    APP_BASE_PATH . '/setup/schema.sql',
+    APP_BASE_PATH . '/setup/seed_settings.sql'
+);
 
 $languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php', 'en');
 $store = new JsonStore([

@@ -58,10 +58,10 @@ class ServiceCategoryRepository extends Repository
         $stmt = $this->pdo->prepare(
             'INSERT INTO service_categories (code, name, caption, sort_order, is_active)
              VALUES (:code, :name, :caption, :sort_order, 1)
-             ON DUPLICATE KEY UPDATE
-                 name = VALUES(name),
-                 caption = VALUES(caption),
-                 sort_order = VALUES(sort_order),
+             ON CONFLICT(code) DO UPDATE SET
+                 name = excluded.name,
+                 caption = excluded.caption,
+                 sort_order = excluded.sort_order,
                  is_active = 1'
         );
         $stmt->execute([

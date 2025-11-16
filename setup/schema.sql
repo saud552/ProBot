@@ -1,214 +1,219 @@
--- Unified Bot Schema (MySQL)
--- تأكد من إنشاء قاعدة البيانات مسبقاً ثم نفّذ هذا السكربت.
--- جميع الجداول تستخدم UTF8MB4 وInnoDB لدعم الأحرف الدولية والمعاملات.
+-- Unified Bot Schema (SQLite)
+PRAGMA foreign_keys = ON;
 
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
+BEGIN TRANSACTION;
 
 CREATE TABLE IF NOT EXISTS users (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    telegram_id BIGINT UNSIGNED NOT NULL UNIQUE,
-    language_code VARCHAR(5) NOT NULL DEFAULT 'ar',
-    is_banned TINYINT(1) NOT NULL DEFAULT 0,
-    maintenance_whitelisted TINYINT(1) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER NOT NULL UNIQUE,
+    language_code TEXT NOT NULL DEFAULT 'ar',
+    is_banned INTEGER NOT NULL DEFAULT 0,
+    maintenance_whitelisted INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS profiles (
-    user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-    first_name VARCHAR(255) NULL,
-    username VARCHAR(255) NULL,
-    referrer_id BIGINT UNSIGNED NULL,
-    last_seen_at TIMESTAMP NULL,
-    CONSTRAINT fk_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_profiles_referrer FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    user_id INTEGER PRIMARY KEY,
+    first_name TEXT NULL,
+    username TEXT NULL,
+    referrer_id INTEGER NULL,
+    last_seen_at DATETIME NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE SET NULL
+);
 
 CREATE TABLE IF NOT EXISTS wallets (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    currency VARCHAR(10) NOT NULL,
-    balance DECIMAL(18,4) NOT NULL DEFAULT 0,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_wallet_user_currency (user_id, currency),
-    CONSTRAINT fk_wallet_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    balance NUMERIC NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_wallet_user_currency ON wallets(user_id, currency);
 
 CREATE TABLE IF NOT EXISTS transactions (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    type ENUM('credit','debit') NOT NULL,
-    method ENUM('manual','invite','purchase','refund','stars','external','smm_purchase','referral') NOT NULL,
-    currency VARCHAR(10) NOT NULL,
-    amount DECIMAL(18,4) NOT NULL,
-    reference VARCHAR(191) NULL,
-    meta JSON NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_transactions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_transactions_user (user_id),
-    INDEX idx_transactions_reference (reference)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('credit','debit')),
+    method TEXT NOT NULL CHECK (
+        method IN ('manual','invite','purchase','refund','stars','external','smm_purchase','referral')
+    ),
+    currency TEXT NOT NULL,
+    amount NUMERIC NOT NULL,
+    reference TEXT NULL,
+    meta TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_reference ON transactions(reference);
 
 CREATE TABLE IF NOT EXISTS referrals (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    referrer_id BIGINT UNSIGNED NOT NULL,
-    referred_user_id BIGINT UNSIGNED NOT NULL,
-    status ENUM('pending','eligible','rewarded','blocked') NOT NULL DEFAULT 'pending',
-    reward_amount DECIMAL(12,4) NOT NULL DEFAULT 0,
-    reward_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-    reward_type ENUM('signup','purchase') NOT NULL DEFAULT 'purchase',
-    order_reference VARCHAR(191) NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    rewarded_at TIMESTAMP NULL,
-    CONSTRAINT fk_referrals_referrer FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_referrals_referred FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_referrals_pair (referrer_id, referred_user_id),
-    UNIQUE KEY uk_referrals_referred (referred_user_id),
-    INDEX idx_referrals_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_id INTEGER NOT NULL,
+    referred_user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','eligible','rewarded','blocked')),
+    reward_amount NUMERIC NOT NULL DEFAULT 0,
+    reward_currency TEXT NOT NULL DEFAULT 'USD',
+    reward_type TEXT NOT NULL DEFAULT 'purchase' CHECK (reward_type IN ('signup','purchase')),
+    order_reference TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    rewarded_at DATETIME NULL,
+    FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_referrals_pair ON referrals(referrer_id, referred_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_referrals_referred ON referrals(referred_user_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status);
 
 CREATE TABLE IF NOT EXISTS settings (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `key` VARCHAR(191) NOT NULL UNIQUE,
-    `value` JSON NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    "key" TEXT NOT NULL UNIQUE,
+    "value" TEXT NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS number_providers (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(191) NOT NULL,
-    base_url VARCHAR(255) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    base_url TEXT NOT NULL,
     api_key TEXT NOT NULL,
-    status ENUM('active','inactive') NOT NULL DEFAULT 'active',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS number_countries (
-    code VARCHAR(8) NOT NULL PRIMARY KEY,
-    name VARCHAR(191) NOT NULL,
-    name_translations JSON NULL,
-    provider_id BIGINT UNSIGNED NOT NULL,
-    price_usd DECIMAL(10,2) NOT NULL DEFAULT 0,
-    margin_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_countries_provider FOREIGN KEY (provider_id) REFERENCES number_providers(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    name_translations TEXT NULL,
+    provider_id INTEGER NOT NULL,
+    price_usd NUMERIC NOT NULL DEFAULT 0,
+    margin_percent NUMERIC NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (provider_id) REFERENCES number_providers(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS orders_numbers (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    country_code VARCHAR(8) NOT NULL,
-    provider_id BIGINT UNSIGNED NOT NULL,
-    number VARCHAR(64) NULL,
-    hash_code VARCHAR(191) NULL,
-    price_usd DECIMAL(10,2) NOT NULL,
-    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-    status ENUM('pending','purchased','delivered','failed','refunded') NOT NULL DEFAULT 'pending',
-    metadata JSON NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_orders_numbers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_orders_numbers_country FOREIGN KEY (country_code) REFERENCES number_countries(code),
-    CONSTRAINT fk_orders_numbers_provider FOREIGN KEY (provider_id) REFERENCES number_providers(id),
-    INDEX idx_orders_numbers_user (user_id),
-    INDEX idx_orders_numbers_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    country_code TEXT NOT NULL,
+    provider_id INTEGER NOT NULL,
+    number TEXT NULL,
+    hash_code TEXT NULL,
+    price_usd NUMERIC NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (
+        status IN ('pending','purchased','delivered','failed','refunded')
+    ),
+    metadata TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (country_code) REFERENCES number_countries(code),
+    FOREIGN KEY (provider_id) REFERENCES number_providers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_orders_numbers_user ON orders_numbers(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_numbers_status ON orders_numbers(status);
 
 CREATE TABLE IF NOT EXISTS service_categories (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    code VARCHAR(64) NOT NULL UNIQUE,
-    name VARCHAR(191) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     caption TEXT NULL,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
-    sort_order INT NOT NULL DEFAULT 0
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS services (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    category_id BIGINT UNSIGNED NOT NULL,
-    provider_code VARCHAR(64) NOT NULL,
-    name VARCHAR(191) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER NOT NULL,
+    provider_code TEXT NOT NULL,
+    name TEXT NOT NULL,
     description TEXT NULL,
-    rate_per_1k DECIMAL(10,4) NOT NULL,
-    min_quantity INT NOT NULL,
-    max_quantity INT NOT NULL,
-    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
-    metadata JSON NULL,
-    CONSTRAINT fk_services_category FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE CASCADE,
-    INDEX idx_services_category (category_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    rate_per_1k NUMERIC NOT NULL,
+    min_quantity INTEGER NOT NULL,
+    max_quantity INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    metadata TEXT NULL,
+    FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_services_category ON services(category_id);
 
 CREATE TABLE IF NOT EXISTS orders_smm (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    service_id BIGINT UNSIGNED NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
     link TEXT NOT NULL,
-    quantity INT NOT NULL,
-    price DECIMAL(18,4) NOT NULL,
-    currency VARCHAR(10) NOT NULL DEFAULT 'USD',
-    status ENUM('pending','processing','completed','partial','canceled') NOT NULL DEFAULT 'pending',
-    provider_order_id VARCHAR(191) NULL,
-    meta JSON NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_orders_smm_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_orders_smm_service FOREIGN KEY (service_id) REFERENCES services(id),
-    INDEX idx_orders_smm_user (user_id),
-    INDEX idx_orders_smm_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    quantity INTEGER NOT NULL,
+    price NUMERIC NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (
+        status IN ('pending','processing','completed','partial','canceled')
+    ),
+    provider_order_id TEXT NULL,
+    meta TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (service_id) REFERENCES services(id)
+);
+CREATE INDEX IF NOT EXISTS idx_orders_smm_user ON orders_smm(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_smm_status ON orders_smm(status);
 
 CREATE TABLE IF NOT EXISTS star_payments (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    telegram_user_id BIGINT UNSIGNED NOT NULL,
-    type ENUM('number','smm') NOT NULL,
-    reference VARCHAR(191) NOT NULL,
-    payload VARCHAR(128) NOT NULL UNIQUE,
-    price_usd DECIMAL(10,2) NOT NULL,
-    stars_amount INT UNSIGNED NOT NULL,
-    currency VARCHAR(10) NOT NULL DEFAULT 'XTR',
-    status ENUM('pending','completed','failed') NOT NULL DEFAULT 'pending',
-    meta JSON NULL,
-    provider_payment_charge_id VARCHAR(191) NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    fulfilled_at TIMESTAMP NULL,
-    CONSTRAINT fk_star_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_star_payments_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    telegram_user_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('number','smm')),
+    reference TEXT NOT NULL,
+    payload TEXT NOT NULL UNIQUE,
+    price_usd NUMERIC NOT NULL,
+    stars_amount INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'XTR',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','failed')),
+    meta TEXT NULL,
+    provider_payment_charge_id TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fulfilled_at DATETIME NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_star_payments_status ON star_payments(status);
 
 CREATE TABLE IF NOT EXISTS tickets (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    status ENUM('open','pending','closed') NOT NULL DEFAULT 'open',
-    subject VARCHAR(255) NOT NULL,
-    last_message_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_tickets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_tickets_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','pending','closed')),
+    subject TEXT NOT NULL,
+    last_message_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 
 CREATE TABLE IF NOT EXISTS ticket_messages (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    ticket_id BIGINT UNSIGNED NOT NULL,
-    sender_type ENUM('user','admin') NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL,
+    sender_type TEXT NOT NULL CHECK (sender_type IN ('user','admin')),
     message TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ticket_messages_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
-    INDEX idx_ticket_messages_ticket (ticket_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id);
 
 CREATE TABLE IF NOT EXISTS action_locks (
-    user_id BIGINT UNSIGNED NOT NULL,
-    action VARCHAR(64) NOT NULL,
-    expires_at INT UNSIGNED NOT NULL,
-    PRIMARY KEY (user_id, action),
-    INDEX idx_action_locks_expires (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    user_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, action)
+);
+CREATE INDEX IF NOT EXISTS idx_action_locks_expires ON action_locks(expires_at);
 
-SET FOREIGN_KEY_CHECKS = 1;
+COMMIT;

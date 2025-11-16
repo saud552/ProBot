@@ -1,13 +1,13 @@
 ## تقرير شامل عن البوت الموحد
 
 ### مقدمة
-تم إنشاء هذا البوت لتجميع كل وظائف بوت الأرقام وبوت الرشق داخل مشروع واحد يعتمد على معمارية طبقية واضحة وقاعدة بيانات MySQL. يشرح هذا التقرير الملفات الأساسية، متطلبات التشغيل، وهيكل المجلدات، بالإضافة إلى كيفية النشر والتشغيل العملي.
+تم إنشاء هذا البوت لتجميع كل وظائف بوت الأرقام وبوت الرشق داخل مشروع واحد يعتمد على معمارية طبقية واضحة وقاعدة بيانات SQLite خفيفة ومضمنة. يشرح هذا التقرير الملفات الأساسية، متطلبات التشغيل، وهيكل المجلدات، بالإضافة إلى كيفية النشر والتشغيل العملي.
 
 ### المتطلبات العامة للتشغيل
-- **قاعدة البيانات**: MySQL 8 (أو متوافق) مع مستخدم يمتلك صلاحيات `CREATE/ALTER/INSERT/UPDATE`.
-- **بيئة PHP**: إصدار 8.1 أو أعلى مع امتدادات `curl`, `json`, `pdo_mysql`.
+- **قاعدة البيانات**: SQLite 3 مع تفعيل إضافة JSON1 (مفعّلة افتراضيًا في حزم PHP الرسمية).
+- **بيئة PHP**: إصدار 8.1 أو أعلى مع امتدادات `curl`, `json`, `pdo_sqlite`.
 - **مفاتيح حساسة (Environment Variables)**: يتم ضبطها إما عبر متغيرات البيئة أو عن طريق أي أداة إدارة أسرار:
-  - `APP_DB_HOST`, `APP_DB_PORT`, `APP_DB_NAME`, `APP_DB_USER`, `APP_DB_PASS`.
+  - `APP_DB_PATH` (مسار ملف SQLite، الافتراضي `storage/database.sqlite`).
   - `APP_TELEGRAM_TOKEN` : توكن بوت تيليجرام.
   - `SPIDER_BASE_URL`, `SPIDER_API_KEY`: مزود الأرقام (Spider Service).
   - `ORBITEXA_BASE_URL`, `ORBITEXA_API_KEY`: مزود الرشق Orbitexa.
@@ -20,7 +20,7 @@ unified-bot/
 ├── bootstrap.php              # تهيئة autoloader وإنشاء مجلدي logs/backups
 ├── index.php                  # نقطة الدخول الأساسية (Webhook) وتجميع التبعيات
 ├── config/
-│   ├── database.php           # قراءة إعدادات MySQL من البيئة
+│   ├── database.php           # قراءة مسار SQLite والخيارات (PRAGMA) من البيئة
 │   ├── providers.php          # إعداد مفاتيح مزودي Spider وOrbitexa
 │   └── telegram.php           # إعدادات تيليجرام (توكن، اسم المستخدم، الوقت المستغرق)
 ├── docs/
@@ -32,8 +32,8 @@ unified-bot/
 │   └── translations.php       # ترجمات الواجهات لكل اللغات المدعومة (ar, en, ru, fa, cht, chb, tr)
 ├── logs/                      # يتم إنشاء سجلات التتبع والأخطاء هنا
 ├── scripts/
-│   ├── backup_database.php    # سكربت نسخ احتياطي SQL (gzip اختياري) يحفظ في storage/backups
-│   └── mysql_audit.php        # فحص سريع للتأكد من وجود الجداول الأساسية وعدد سجلاتها
+│   ├── backup_database.php    # سكربت ينسخ ملف SQLite (gzip اختياري) إلى storage/backups
+│   └── sqlite_audit.php       # فحص سريع للتأكد من سلامة القاعدة والجداول الأساسية
 ├── setup/
 │   ├── schema.sql             # إنشاء كامل للجداول (users, wallets, orders, star_payments...)
 │   └── seed_settings.sql      # بيانات افتراضية (إدمن، قنوات، إعدادات Stars, Referrals)
@@ -67,17 +67,14 @@ unified-bot/
 ### خطوات النشر والتشغيل
 1. **إعداد قاعدة البيانات**:
    ```bash
-   mysql -u root -p -e "CREATE DATABASE unified_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-   mysql -u root -p unified_bot < setup/schema.sql
-   mysql -u root -p unified_bot < setup/seed_settings.sql
+   mkdir -p storage
+   touch storage/database.sqlite
+   sqlite3 storage/database.sqlite < setup/schema.sql
+   sqlite3 storage/database.sqlite < setup/seed_settings.sql
    ```
 2. **ضبط المتغيرات البيئية** (مثال Bash):
    ```bash
-   export APP_DB_HOST=127.0.0.1
-   export APP_DB_PORT=3306
-   export APP_DB_NAME=unified_bot
-   export APP_DB_USER=bot_user
-   export APP_DB_PASS=super_secret
+   export APP_DB_PATH=/path/to/unified-bot/storage/database.sqlite
    export APP_TELEGRAM_TOKEN=123456:ABCDEF
    export SPIDER_BASE_URL=https://api.spider-service.com
    export SPIDER_API_KEY=live_spider_key
@@ -94,12 +91,13 @@ unified-bot/
    ```
 5. **فحص صحة الاتصال**:
    ```bash
-   php scripts/mysql_audit.php
+   php scripts/sqlite_audit.php
    ```
 6. **النسخ الاحتياطي الدوري** (مثال cron كل ساعة):
    ```
    0 * * * * cd /path/to/unified-bot && /usr/bin/php scripts/backup_database.php >/dev/null 2>&1
    ```
+   سينتج السكربت ملفًا باسم `unified-bot-YYYYmmdd_HHMMSS.sqlite` أو نسخة مضغوطة (`.sqlite.gz`) داخل `storage/backups`.
 
 ### ملاحظات إضافية للتشغيل
 - تأكد من أن خدمة الويب (Apache/Nginx) تسمح بتمرير طلبات POST إلى `index.php`.

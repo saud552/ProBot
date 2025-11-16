@@ -3,11 +3,7 @@
 ### 1. تهيئة إعدادات البيئة
 أنشئ ملف `.env` (أو استخدم متغيرات البيئة في الخادم) لضبط المفاتيح الحساسة:
 ```
-APP_DB_HOST=127.0.0.1
-APP_DB_PORT=3306
-APP_DB_NAME=unified_bot
-APP_DB_USER=bot_user
-APP_DB_PASS=bot_password
+APP_DB_PATH=/path/to/unified-bot/storage/database.sqlite
 
 APP_TELEGRAM_TOKEN=123456:ABCDEF
 SPIDER_BASE_URL=https://api.spider-service.com
@@ -16,15 +12,16 @@ SPIDER_API_KEY=live_spider_key
 
 ### 2. إنشاء قاعدة البيانات
 ```bash
-mysql -u root -p -e "CREATE DATABASE unified_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p unified_bot < setup/schema.sql
-mysql -u root -p unified_bot < setup/seed_settings.sql
+mkdir -p storage
+touch storage/database.sqlite
+sqlite3 storage/database.sqlite < setup/schema.sql
+sqlite3 storage/database.sqlite < setup/seed_settings.sql
 ```
 تأكد من تعديل معرّفات القنوات في `seed_settings.sql` قبل التنفيذ.
 
 ### 3. نشر الكود وضبط الويب هوك
 ```bash
-export APP_DB_HOST=... # وغيرها كما في الخطوة 1
+export APP_DB_PATH=/path/to/unified-bot/storage/database.sqlite
 php -S 0.0.0.0:8080 -t /path/to/unified-bot
 curl "https://api.telegram.org/bot$APP_TELEGRAM_TOKEN/setWebhook?url=https://yourdomain.com/index.php"
 ```
@@ -50,23 +47,27 @@ curl "https://api.telegram.org/bot$APP_TELEGRAM_TOKEN/setWebhook?url=https://you
 قبل كل تفاعل، البوت يتحقق من عضوية المستخدم في القنوات المحددة. لتحديث القنوات:
 ```sql
 UPDATE settings
-SET value = JSON_SET(value, '$.channels', JSON_ARRAY(JSON_OBJECT('id', -100..., 'link', 'https://t.me/...')))
-WHERE `key` = 'forced_subscription';
+SET value = json_set(
+    value,
+    '$.channels',
+    json('[{"id": -100..., "link": "https://t.me/..."}]')
+)
+WHERE "key" = 'forced_subscription';
 ```
 
 ### 7. مراقبة السجلات
 - أخطاء تيليجرام: `logs/telegram.log`
 - يمكن إضافة tail للويب هوك لتتبع الطلبات.
 
-### 8. التحقق من تزامن MySQL
-يوجد سكريبت تدقيق سريع للتأكد من أن الجداول الأساسية (users, wallets, transactions, orders_numbers, orders_smm, referrals, tickets, ticket_messages, star_payments, settings) متاحة وتستخدم فعلياً:
+### 8. التحقق من سلامة SQLite
+يوجد سكربت تدقيق سريع للتأكد من أن الجداول الأساسية (users, wallets, transactions, orders_numbers, orders_smm, referrals, tickets, ticket_messages, star_payments, settings) متاحة وأن `PRAGMA integrity_check` تمر دون أخطاء:
 ```bash
-php scripts/mysql_audit.php
+php scripts/sqlite_audit.php
 ```
-سيطبع السكريبت عدد السجلات وأي مشكلة اتصال، ويمكن ربطه مع مهام مراقبة أو تشغيله بعد كل ترحيل.
+سيطبع السكربت عدد السجلات لكل جدول وأي ملاحظة تتعلق بسلامة القاعدة، ويمكن ربطه مع مهام مراقبة أو تشغيله بعد كل ترحيل.
 
 ### 9. النسخ الاحتياطي الدوري
-للاستفادة من المجلد `storage/backups` يوجد سكريبت نسخ احتياطي يولّد ملف SQL (ويضغطه تلقائياً إلى GZip إذا توفّر `gzencode`):
+للاستفادة من المجلد `storage/backups` يوجد سكربت ينسخ ملف SQLite (ويضغطه تلقائياً إلى GZip إذا توفّر `gzencode`):
 ```bash
 php scripts/backup_database.php
 ```
@@ -74,13 +75,13 @@ php scripts/backup_database.php
 ```
 0 * * * * cd /path/to/unified-bot && /usr/bin/php scripts/backup_database.php >/dev/null 2>&1
 ```
-سيتم إنشاء ملف باسم `unified-bot-YYYYmmdd_HHMMSS.sql.gz` داخل `storage/backups`.
+سيتم إنشاء ملف باسم `unified-bot-YYYYmmdd_HHMMSS.sqlite` (أو `.sqlite.gz`) داخل `storage/backups`.
 
 ### 10. تعريب أسماء الدول
 يعتمد البوت الآن على الحقل `name_translations` داخل جدول `number_countries` لعرض اسم الدولة بنفس لغة المستخدم. قم بتعبئة الحقل بصيغة JSON تحتوي على اختصارات اللغات المتاحة (مثل `ar`, `en`, `ru`, `fa`, `cht`, `chb`, `tr`). مثال سريع:
 ```sql
 UPDATE number_countries
-SET name_translations = JSON_OBJECT(
+SET name_translations = json_object(
     'ar', 'الولايات المتحدة',
     'en', 'United States',
     'ru', 'США'
@@ -89,4 +90,4 @@ WHERE code = 'US';
 ```
 عند عدم توافر ترجمة بلغة المستخدم سيظهر الاسم الافتراضي (الإنجليزي)، لكن يوصى بتعبئة جميع الاختصارات لضمان تجربة متسقة.
 
-باتباع الخطوات أعلاه يمكنك تشغيل البوت فعلياً والتحقق من مسارات شراء الرقم وطلب الكود والإشعارات، إضافةً إلى مراقبة التزامن مع MySQL والاحتفاظ بنسخ احتياطية حديثة. أي تغييرات إضافية (مثل دمج خدمات الرشق) ستتطلب تحديثات مشابهة في القاعدة والإعدادات.
+باتباع الخطوات أعلاه يمكنك تشغيل البوت فعلياً والتحقق من مسارات شراء الرقم وطلب الكود والإشعارات، إضافةً إلى مراقبة سلامة SQLite والاحتفاظ بنسخ احتياطية حديثة. أي تغييرات إضافية (مثل دمج خدمات الرشق) ستتطلب تحديثات مشابهة في القاعدة والإعدادات.
