@@ -2235,6 +2235,201 @@ class BotKernel
         );
     }
 
+    /**
+     * @return array{type:string,id:int}|null
+     */
+    private function parseRefundReference(string $value): ?array
+    {
+        $normalized = strtolower(trim($value));
+        $parts = explode(':', $normalized);
+        if (count($parts) !== 2) {
+            return null;
+        }
+        if (!in_array($parts[0], ['numbers', 'smm'], true)) {
+            return null;
+        }
+        if (!ctype_digit($parts[1])) {
+            return null;
+        }
+
+        return [
+            'type' => $parts[0],
+            'id' => (int)$parts[1],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function resolveRefundDetails(string $type, int $orderId): ?array
+    {
+        if ($type === 'numbers') {
+            $order = $this->numberOrders->find($orderId);
+            if (!$order) {
+                return null;
+            }
+            $amount = (float)($order['price_usd'] ?? 0);
+            $currency = (string)($order['currency'] ?? 'USD');
+            $status = (string)($order['status'] ?? '');
+            $userId = (int)($order['user_id'] ?? 0);
+            $telegramId = $this->resolveTelegramIdByUserId($userId);
+
+            return [
+                'type' => 'numbers',
+                'order_id' => $orderId,
+                'order' => $order,
+                'user_id' => $userId,
+                'telegram_id' => $telegramId,
+                'amount' => $amount,
+                'currency' => $currency,
+                'reference' => sprintf('number:%d', $orderId),
+                'already_refunded' => $status === 'refunded',
+            ];
+        }
+
+        $order = $this->smmOrders->find($orderId);
+        if (!$order) {
+            return null;
+        }
+        $amount = (float)($order['price'] ?? 0);
+        $currency = (string)($order['currency'] ?? 'USD');
+        $status = (string)($order['status'] ?? '');
+        $userId = (int)($order['user_id'] ?? 0);
+        $telegramId = $this->resolveTelegramIdByUserId($userId);
+
+        return [
+            'type' => 'smm',
+            'order_id' => $orderId,
+            'order' => $order,
+            'user_id' => $userId,
+            'telegram_id' => $telegramId,
+            'amount' => $amount,
+            'currency' => $currency,
+            'reference' => sprintf('smm:%d', $orderId),
+            'already_refunded' => in_array($status, ['canceled', 'refunded'], true),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $details
+     */
+    private function finalizeOrderRefund(
+        int $chatId,
+        int $adminDbId,
+        int $adminTelegramId,
+        array $details,
+        array $strings
+    ): void {
+        $userId = (int)$details['user_id'];
+        $amount = (float)$details['amount'];
+        $currency = (string)$details['currency'];
+        $telegramId = $details['telegram_id'] ?? null;
+
+        if ($userId <= 0) {
+            $this->clearAdminState($adminDbId);
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            return;
+        }
+
+        try {
+            $this->wallets->credit($userId, $amount, $currency);
+        } catch (Throwable $e) {
+            $this->clearAdminState($adminDbId);
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            return;
+        }
+
+        $this->recordAdminTransaction(
+            $userId,
+            'credit',
+            $amount,
+            $currency,
+            'refund',
+            [
+                'admin_user_id' => $adminDbId,
+                'admin_telegram_id' => $adminTelegramId,
+                'order_reference' => $details['reference'],
+            ]
+        );
+
+        $order = $details['order'];
+        $meta = $this->decodeOrderMetadata($order['meta'] ?? ($order['metadata'] ?? null));
+        $meta['admin_refund'] = [
+            'admin' => $adminTelegramId,
+            'amount' => $amount,
+            'currency' => $currency,
+            'timestamp' => time(),
+        ];
+
+        if ($details['type'] === 'numbers') {
+            $this->numberOrders->updateStatus((int)$details['order_id'], 'refunded', $meta);
+        } else {
+            $this->smmOrders->updateStatus((int)$details['order_id'], 'canceled', $meta);
+        }
+
+        $this->referralService->revertRewardByReference($details['reference']);
+
+        if ($telegramId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $telegramId,
+                'text' => sprintf($strings['admin_wallet_user_refund'] ?? 'A refund of %0.2f USD has been added to your wallet.', $amount),
+            ]);
+        }
+
+        $this->logAdminAction(sprintf(
+            'Refunded %0.2f %s for %s',
+            $amount,
+            $currency,
+            $details['reference']
+        ));
+
+        $this->clearAdminState($adminDbId);
+        $this->sendMessage($chatId, $strings['admin_wallet_refund_done'] ?? 'Refund completed successfully.', []);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    private function decodeOrderMetadata($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    private function recordAdminTransaction(
+        int $userId,
+        string $direction,
+        float $amount,
+        string $currency,
+        string $mode,
+        array $meta = []
+    ): void {
+        $this->transactions->log(
+            $userId,
+            $direction,
+            $mode === 'refund' ? 'refund' : 'admin_manual',
+            $amount,
+            $currency,
+            $meta['order_reference'] ?? null,
+            $meta
+        );
+    }
+
+    private function resolveTelegramIdByUserId(int $userId): ?int
+    {
+        $user = $this->userManager->findById($userId);
+        return $user ? (int)$user['telegram_id'] : null;
+    }
+
     private function showAdminReferralsPanel(int $chatId, int $messageId, array $strings): void
     {
         $config = $this->settings->referrals();
