@@ -1,4 +1,0 @@
-<?php
-
-
-unlink('error.txt');
