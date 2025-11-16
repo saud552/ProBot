@@ -341,6 +341,20 @@ class BotKernel
             return;
         }
 
+        if (($parts[0] ?? '') === 'lang') {
+            $this->handleLanguageCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $telegramUserId,
+                $parts,
+                $strings,
+                $backLabel
+            );
+            return;
+        }
+
         switch ($data) {
             case 'inviteLink':
                 $this->handleReferralCallback(
@@ -352,6 +366,9 @@ class BotKernel
                     $strings,
                     $backLabel
                 );
+                break;
+            case 'changeLanguage':
+                $this->showLanguageMenu($chatId, $messageId, $strings, $backLabel);
                 break;
             case 'back':
                 $this->editMessage(
@@ -2151,6 +2168,102 @@ class BotKernel
         }
 
         return false;
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showLanguageMenu(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $options = $this->languages->options();
+        $text = $strings['change_language_prompt'] ?? 'Choose your preferred language:';
+        $keyboard = [];
+        $row = [];
+        $current = $strings['_lang'] ?? '';
+
+        foreach ($options as $code => $label) {
+            $buttonText = $label;
+            if ($code === $current) {
+                $buttonText = '• ' . $label . ' •';
+            }
+
+            $row[] = [
+                'text' => $buttonText,
+                'callback_data' => sprintf('lang:set:%s', $code),
+            ];
+
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+
+        if ($row !== []) {
+            $keyboard[] = $row;
+        }
+
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleLanguageCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $telegramUserId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'list';
+        if ($action !== 'set') {
+            $this->showLanguageMenu($chatId, $messageId, $strings, $backLabel);
+            return;
+        }
+
+        $code = $parts[2] ?? '';
+        $options = $this->languages->options();
+        if ($code === '' || !isset($options[$code])) {
+            $this->answerCallback(
+                $callbackId,
+                $strings['change_language_error'] ?? 'Unable to change language right now.',
+                true
+            );
+            return;
+        }
+
+        $normalized = $this->languages->ensure($code);
+        $this->userManager->updateLanguagePreference($userDbId, $normalized);
+        $this->cacheLanguage($telegramUserId, $normalized);
+
+        $updatedStrings = $this->languages->strings($normalized);
+        $changeLabel = $this->languages->label($normalized, 'change_language', 'Change Language');
+
+        $this->answerCallback(
+            $callbackId,
+            $updatedStrings['change_language_success'] ?? 'Language updated successfully.'
+        );
+
+        $this->editMessage(
+            $chatId,
+            $messageId,
+            $updatedStrings['main_menu'] ?? 'Main Menu',
+            $this->keyboardFactory->mainMenu($updatedStrings, $changeLabel, [
+                'features' => $this->features,
+                'is_admin' => $this->isAdmin($telegramUserId),
+            ])
+        );
     }
 
     /**

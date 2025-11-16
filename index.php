@@ -9,6 +9,8 @@ use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Referrals\ReferralService;
+use App\Domain\Smm\SmmCatalogService;
+use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Payments\StarPaymentService;
 use App\Domain\Notifications\NotificationService;
 use App\Domain\Settings\ForcedSubscriptionService;
