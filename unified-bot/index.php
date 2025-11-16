@@ -47,6 +47,7 @@ $store = new JsonStore([
     'langs' => APP_BASE_PATH . '/storage/langs.json',
     'smm_flow' => APP_BASE_PATH . '/storage/smm_flow.json',
     'support_flow' => APP_BASE_PATH . '/storage/support_flow.json',
+    'admin_flow' => APP_BASE_PATH . '/storage/admin_flow.json',
 ]);
 $keyboardFactory = new KeyboardFactory();
 $telegram = new TelegramClient($telegramConfig);
