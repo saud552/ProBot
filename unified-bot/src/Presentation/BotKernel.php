@@ -222,7 +222,10 @@ class BotKernel
         $this->sendMessage(
             $chatId,
             $strings['main_menu'] ?? 'Main Menu',
-            $this->keyboardFactory->mainMenu($strings, $changeLabel)
+            $this->keyboardFactory->mainMenu($strings, $changeLabel, [
+                'features' => $this->features,
+                'is_admin' => $this->isAdmin($telegramUserId),
+            ])
         );
     }
 
@@ -338,19 +341,6 @@ class BotKernel
             return;
         }
 
-        if (($parts[0] ?? '') === 'admin') {
-            $this->handleAdminTicketCallback(
-                $chatId,
-                $messageId,
-                $callbackId,
-                $telegramUserId,
-                $userDbId,
-                $parts,
-                $strings
-            );
-            return;
-        }
-
         switch ($data) {
             case 'inviteLink':
                 $this->handleReferralCallback(
@@ -420,6 +410,10 @@ class BotKernel
                 $this->showNumbersList($chatId, $messageId, $strings, $backLabel, 0);
                 return;
             case 'stars':
+                if (!$this->starsPaymentsEnabled()) {
+                    $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                    return;
+                }
                 $this->showNumbersStarList($chatId, $messageId, $strings, $backLabel, 0);
                 return;
             case 'list':
@@ -427,6 +421,10 @@ class BotKernel
                 $this->showNumbersList($chatId, $messageId, $strings, $backLabel, $page);
                 return;
             case 'starslist':
+                if (!$this->starsPaymentsEnabled()) {
+                    $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                    return;
+                }
                 $page = max(0, (int)($parts[2] ?? 0));
                 $this->showNumbersStarList($chatId, $messageId, $strings, $backLabel, $page);
                 return;
@@ -458,6 +456,10 @@ class BotKernel
                 );
                 return;
             case 'starscountry':
+                if (!$this->starsPaymentsEnabled()) {
+                    $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                    return;
+                }
                 $code = $parts[2] ?? '';
                 if ($code === '') {
                     $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
@@ -467,6 +469,10 @@ class BotKernel
                 $this->showNumberStarDetails($chatId, $messageId, strtoupper($code), $page, $strings, $backLabel);
                 return;
             case 'starsbuy':
+                if (!$this->starsPaymentsEnabled()) {
+                    $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                    return;
+                }
                 $code = $parts[2] ?? '';
                 if ($code === '') {
                     $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
@@ -599,6 +605,20 @@ class BotKernel
         string $backLabel,
         int $page
     ): void {
+        if (!$this->starsPaymentsEnabled()) {
+            $this->editMessage(
+                $chatId,
+                $messageId,
+                $strings['stars_disabled'] ?? 'Stars option unavailable.',
+                [
+                    [
+                        ['text' => $backLabel, 'callback_data' => 'numbers:root'],
+                    ],
+                ]
+            );
+            return;
+        }
+
         $payload = $this->numbersStarListPayload($strings, $backLabel, $page);
         $this->editMessage($chatId, $messageId, $payload['text'], $payload['keyboard']);
     }
@@ -732,6 +752,11 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
+        if (!$this->starsPaymentsEnabled()) {
+            $this->answerCallback(null, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+            return;
+        }
+
         $country = $this->numberCatalog->find($countryCode);
         if (!$country) {
             $this->editMessage(
@@ -789,6 +814,11 @@ class BotKernel
         int $page,
         array $strings
     ): void {
+        if (!$this->starsPaymentsEnabled()) {
+            $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+            return;
+        }
+
         $country = $this->numberCatalog->find($countryCode);
         if (!$country) {
             $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
@@ -1023,6 +1053,10 @@ class BotKernel
                 $this->showSmmCategories($chatId, $messageId, $strings, $backLabel, 'usd');
                 return;
             case 'stars':
+                if (!$this->starsPaymentsEnabled()) {
+                    $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                    return;
+                }
                 $this->setSmmPaymentMethod($userDbId, 'stars');
                 $this->showSmmCategories($chatId, $messageId, $strings, $backLabel, 'stars');
                 return;
@@ -1266,7 +1300,7 @@ class BotKernel
                     $callbackId,
                     $telegramUserId,
                     $userDbId,
-                    array_slice($parts, 1),
+                    $parts,
                     $strings
                 );
                 return;
@@ -1854,6 +1888,10 @@ class BotKernel
         }
 
         if ($paymentMethod === 'stars') {
+            if (!$this->starsPaymentsEnabled()) {
+                $this->answerCallback($callbackId, $strings['stars_disabled'] ?? 'Stars option unavailable.', true);
+                return;
+            }
             try {
                 $invoice = $this->starPayments->createSmmInvoice(
                     $userDbId,
@@ -2112,6 +2150,11 @@ class BotKernel
     ): void {
         if (!$this->featureEnabled('referrals')) {
             $this->answerCallback($callbackId, $strings['feature_disabled'] ?? 'This section is disabled.', true);
+            return;
+        }
+
+        if (!$this->referralService->isEnabled()) {
+            $this->answerCallback($callbackId, $strings['referral_disabled'] ?? 'Referral program is disabled.', true);
             return;
         }
 
