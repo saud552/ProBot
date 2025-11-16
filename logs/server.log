@@ -136,3 +136,15 @@
 [Sun Nov 16 03:03:58 2025] 127.0.0.1:49090 Closed without sending a request; it was probably just an unused speculative preconnection
 [Sun Nov 16 03:03:58 2025] 127.0.0.1:49090 Closing
 [Sun Nov 16 03:03:58 2025] 127.0.0.1:59130 Accepted
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:59124 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:59124 Closing
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:38926 Accepted
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:59130 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:59130 Closing
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:38928 Accepted
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:38926 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:38926 Closing
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:57774 Accepted
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:38928 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:38928 Closing
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:57788 Accepted
