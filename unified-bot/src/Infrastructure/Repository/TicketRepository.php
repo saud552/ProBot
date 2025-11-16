@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Repository;
 
+use PDO;
+
 class TicketRepository extends Repository
 {
     public function create(int $userId, string $subject, string $message, string $status = 'open'): int
@@ -39,5 +41,82 @@ class TicketRepository extends Repository
         $this->pdo
             ->prepare('UPDATE tickets SET last_message_at = NOW() WHERE id = :id')
             ->execute(['id' => $ticketId]);
+    }
+
+    public function find(int $ticketId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM tickets WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $ticketId]);
+        $ticket = $stmt->fetch();
+
+        return $ticket ?: null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listByUser(int $userId, int $limit = 5): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM tickets WHERE user_id = :user ORDER BY last_message_at DESC LIMIT :limit'
+        );
+        $stmt->bindValue('user', $userId, PDO::PARAM_INT);
+        $stmt->bindValue('limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listAll(?string $status, int $limit = 10): array
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM tickets WHERE status = :status ORDER BY last_message_at DESC LIMIT :limit'
+            );
+            $stmt->bindValue('status', $status);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM tickets ORDER BY last_message_at DESC LIMIT :limit'
+            );
+        }
+
+        $stmt->bindValue('limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function messages(int $ticketId, int $limit = 15): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ticket_messages
+             WHERE ticket_id = :ticket
+             ORDER BY id DESC
+             LIMIT :limit'
+        );
+        $stmt->bindValue('ticket', $ticketId, PDO::PARAM_INT);
+        $stmt->bindValue('limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $messages = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_reverse($messages);
+    }
+
+    public function updateStatus(int $ticketId, string $status): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE tickets SET status = :status, updated_at = NOW() WHERE id = :id'
+        );
+        $stmt->execute([
+            'status' => $status,
+            'id' => $ticketId,
+        ]);
     }
 }

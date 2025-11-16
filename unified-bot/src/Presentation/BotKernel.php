@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace App\Presentation;
 
 use App\Domain\Localization\LanguageManager;
+use App\Domain\Notifications\NotificationService;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Payments\StarPaymentService;
+use App\Domain\Referrals\ReferralService;
 use App\Domain\Smm\SmmCatalogService;
 use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Settings\ForcedSubscriptionService;
+use App\Domain\Settings\SettingsService;
+use App\Domain\Support\TicketService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Infrastructure\Storage\JsonStore;
@@ -35,6 +39,10 @@ class BotKernel
     private SmmCatalogService $smmCatalog;
     private SmmPurchaseService $smmPurchase;
     private StarPaymentService $starPayments;
+    private TicketService $ticketService;
+    private NotificationService $notifications;
+    private ReferralService $referralService;
+    private SettingsService $settings;
 
     /**
      * @var array<int, string>
@@ -44,6 +52,10 @@ class BotKernel
      * @var array<int, array<string, mixed>>
      */
     private array $smmFlow = [];
+    /**
+     * @var array<int, array<string, mixed>>
+     */
+    private array $ticketFlow = [];
 
     public function __construct(
         LanguageManager $languages,
@@ -58,7 +70,11 @@ class BotKernel
         ForcedSubscriptionService $forcedSubscription,
         SmmCatalogService $smmCatalog,
         SmmPurchaseService $smmPurchase,
-        StarPaymentService $starPayments
+        StarPaymentService $starPayments,
+        TicketService $ticketService,
+        NotificationService $notifications,
+        ReferralService $referralService,
+        SettingsService $settings
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -73,8 +89,13 @@ class BotKernel
         $this->smmCatalog = $smmCatalog;
         $this->smmPurchase = $smmPurchase;
         $this->starPayments = $starPayments;
+        $this->ticketService = $ticketService;
+        $this->notifications = $notifications;
+        $this->referralService = $referralService;
+        $this->settings = $settings;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
+        $this->ticketFlow = $this->store->load('support_flow', []);
     }
 
     public function handle(array $update): void
@@ -124,6 +145,18 @@ class BotKernel
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
         $changeLabel = $this->languages->label($userLang, 'change_language', 'Change Language');
+        $backLabel = $this->languages->label($userLang, 'back', 'Back');
+
+        if (strpos($text, '/start') === 0) {
+            $payload = trim(substr($text, 6));
+            if ($payload !== '' && $this->referralService->captureFromPayload($userDbId, $payload)) {
+                $this->sendMessage(
+                    $chatId,
+                    $strings['referral_attached'] ?? 'Referral recorded successfully.',
+                    []
+                );
+            }
+        }
 
         if (isset($message['successful_payment'])) {
             $this->handleSuccessfulPayment($message, $userDbId, $strings);
@@ -134,13 +167,22 @@ class BotKernel
             return;
         }
 
-        if ($text === '/start') {
+        if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->clearSmmState($userDbId);
+            $this->clearTicketState($userDbId);
             $this->sendMessage(
                 $chatId,
                 $strings['welcome'] ?? 'Welcome',
                 $this->keyboardFactory->mainMenu($strings, $changeLabel)
             );
+            return;
+        }
+
+        if ($this->isAdmin($telegramUserId) && $this->handleAdminTextCommand($chatId, $text, $strings)) {
+            return;
+        }
+
+        if ($this->handleTicketTextInput($chatId, $userDbId, $telegramUserId, $text, $strings)) {
             return;
         }
 
@@ -222,7 +264,57 @@ class BotKernel
             return;
         }
 
+        if (($parts[0] ?? '') === 'support') {
+            $this->handleSupportCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $parts,
+                $strings,
+                $backLabel
+            );
+            return;
+        }
+
+        if (($parts[0] ?? '') === 'ref') {
+            $this->handleReferralCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $parts,
+                $strings,
+                $backLabel
+            );
+            return;
+        }
+
+        if (($parts[0] ?? '') === 'admin') {
+            $this->handleAdminTicketCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $telegramUserId,
+                $userDbId,
+                $parts,
+                $strings
+            );
+            return;
+        }
+
         switch ($data) {
+            case 'inviteLink':
+                $this->handleReferralCallback(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $userDbId,
+                    ['ref', 'root'],
+                    $strings,
+                    $backLabel
+                );
+                break;
             case 'back':
                 $this->editMessage(
                     $chatId,
@@ -768,6 +860,11 @@ class BotKernel
 
         $payload = $this->numberPurchaseSuccessPayload($strings, $country, $order, $page);
         $this->editMessage($chatId, $messageId, $payload['text'], $payload['keyboard']);
+        $this->referralService->handleSuccessfulOrder(
+            $userDbId,
+            (float)$order['price_usd'],
+            sprintf('number:%d', $order['id'])
+        );
         $this->answerCallback($callbackId, '✅');
     }
 
@@ -907,6 +1004,271 @@ class BotKernel
                 );
                 return;
         }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleSupportCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'root';
+        switch ($action) {
+            case 'root':
+                $this->editMessage(
+                    $chatId,
+                    $messageId,
+                    $strings['support_intro'] ?? 'Need help? Open a ticket and we will assist you shortly.',
+                    [
+                        [
+                            [
+                                'text' => $strings['support_new_ticket_button'] ?? 'Open Ticket',
+                                'callback_data' => 'support:new',
+                            ],
+                            [
+                                'text' => $strings['support_my_tickets_button'] ?? 'My Tickets',
+                                'callback_data' => 'support:list',
+                            ],
+                        ],
+                        [
+                            ['text' => $backLabel, 'callback_data' => 'back'],
+                        ],
+                    ]
+                );
+                return;
+            case 'new':
+                $this->setTicketState($userDbId, [
+                    'state' => 'await_subject',
+                    'role' => 'user',
+                ]);
+                $this->answerCallback($callbackId, '✍️');
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_subject_prompt'] ?? 'Send the subject for your ticket.',
+                    []
+                );
+                return;
+            case 'list':
+                $this->showUserTickets($chatId, $messageId, $userDbId, $strings, $backLabel);
+                return;
+            case 'view':
+                $ticketId = (int)($parts[2] ?? 0);
+                if ($ticketId <= 0) {
+                    $this->answerCallback($callbackId, $strings['support_ticket_list_empty'] ?? 'No tickets found.', true);
+                    return;
+                }
+                $this->showTicketConversation(
+                    $chatId,
+                    $messageId,
+                    $ticketId,
+                    $strings,
+                    $backLabel,
+                    'user',
+                    $userDbId
+                );
+                return;
+            case 'reply':
+                $ticketId = (int)($parts[2] ?? 0);
+                if ($ticketId <= 0) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket || (int)$ticket['user_id'] !== $userDbId) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $this->setTicketState($userDbId, [
+                    'state' => 'await_reply',
+                    'ticket_id' => $ticketId,
+                    'role' => 'user',
+                ]);
+                $this->answerCallback($callbackId, '✍️');
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_reply_prompt'] ?? 'Please type your reply.',
+                    []
+                );
+                return;
+            case 'close':
+                $ticketId = (int)($parts[2] ?? 0);
+                if ($ticketId <= 0) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket || (int)$ticket['user_id'] !== $userDbId) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $this->ticketService->updateStatus($ticketId, 'closed');
+                $this->notifications->notifyTicketUpdate($ticket, 'Ticket closed by user.', 'user');
+                $this->clearTicketState($userDbId);
+                $this->answerCallback($callbackId, '✅');
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_closed'] ?? 'Ticket closed. Thank you!',
+                    []
+                );
+                return;
+            default:
+                $this->answerCallback($callbackId, '❔', true);
+                return;
+        }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showUserTickets(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $tickets = $this->ticketService->userTickets($userDbId, 10);
+        $text = $strings['support_ticket_list_title'] ?? 'Your tickets';
+
+        $keyboard = [];
+        if ($tickets === []) {
+            $text .= PHP_EOL . PHP_EOL . ($strings['support_ticket_list_empty'] ?? 'No tickets yet.');
+        } else {
+            foreach ($tickets as $ticket) {
+                $status = strtoupper((string)$ticket['status']);
+                $label = sprintf(
+                    '#%d • %s • %s',
+                    $ticket['id'],
+                    $ticket['subject'] ?? '-',
+                    $status
+                );
+                $keyboard[] = [
+                    [
+                        'text' => $label,
+                        'callback_data' => sprintf('support:view:%d', $ticket['id']),
+                    ],
+                ];
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $strings['support_new_ticket_button'] ?? 'Open Ticket', 'callback_data' => 'support:new'],
+        ];
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'support:root'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showTicketConversation(
+        int $chatId,
+        int $messageId,
+        int $ticketId,
+        array $strings,
+        string $backLabel,
+        string $role,
+        ?int $userDbId = null
+    ): void {
+        $ticket = $this->ticketService->find($ticketId);
+        if (!$ticket) {
+            $this->editMessage($chatId, $messageId, $strings['support_ticket_list_empty'] ?? 'Ticket not found.', [
+                [
+                    ['text' => $backLabel, 'callback_data' => $role === 'admin' ? 'admin:tickets:list' : 'support:list'],
+                ],
+            ]);
+            return;
+        }
+
+        if ($role === 'user' && $userDbId !== null && (int)$ticket['user_id'] !== $userDbId) {
+            $this->editMessage($chatId, $messageId, $strings['support_ticket_list_empty'] ?? 'Ticket not found.', [
+                [
+                    ['text' => $backLabel, 'callback_data' => 'support:list'],
+                ],
+            ]);
+            return;
+        }
+
+        $messages = $this->ticketService->messages($ticketId, 15);
+        $text = $this->formatTicketConversation($ticket, $messages, $strings);
+
+        $keyboard = [];
+        if ($role === 'user') {
+            $keyboard[] = [
+                [
+                    'text' => $strings['support_ticket_reply_button'] ?? 'Reply',
+                    'callback_data' => sprintf('support:reply:%d', $ticketId),
+                ],
+            ];
+            if (($ticket['status'] ?? '') !== 'closed') {
+                $keyboard[0][] = [
+                    'text' => $strings['support_ticket_close_button'] ?? 'Close',
+                    'callback_data' => sprintf('support:close:%d', $ticketId),
+                ];
+            }
+            $keyboard[] = [
+                ['text' => $backLabel, 'callback_data' => 'support:list'],
+            ];
+        } else {
+            $keyboard[] = [
+                [
+                    'text' => $strings['support_ticket_reply_button'] ?? 'Reply',
+                    'callback_data' => sprintf('admin:tickets:reply:%d', $ticketId),
+                ],
+            ];
+            if (($ticket['status'] ?? '') !== 'closed') {
+                $keyboard[0][] = [
+                    'text' => $strings['support_ticket_close_button'] ?? 'Close',
+                    'callback_data' => sprintf('admin:tickets:close:%d', $ticketId),
+                ];
+            }
+            $keyboard[] = [
+                ['text' => $backLabel, 'callback_data' => 'admin:tickets:list'],
+            ];
+        }
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $messages
+     * @param array<string, string> $strings
+     */
+    private function formatTicketConversation(array $ticket, array $messages, array $strings): string
+    {
+        $statusLabel = strtoupper((string)($ticket['status'] ?? 'open'));
+        $header = sprintf(
+            "%s #%d\n%s: %s\n%s: %s",
+            $strings['support_ticket_header'] ?? 'Ticket',
+            $ticket['id'],
+            $strings['support_ticket_status_label'] ?? 'Status',
+            $statusLabel,
+            $strings['support_ticket_subject_label'] ?? 'Subject',
+            $this->esc($ticket['subject'] ?? '-')
+        );
+
+        $body = [];
+        foreach ($messages as $message) {
+            $sender = ($message['sender_type'] ?? '') === 'admin'
+                ? ($strings['support_admin_label'] ?? 'Admin')
+                : ($strings['support_user_label'] ?? 'You');
+            $body[] = sprintf(
+                "%s:\n%s",
+                $sender,
+                $this->esc((string)$message['message'])
+            );
+        }
+
+        return $header . PHP_EOL . PHP_EOL . implode(PHP_EOL . '---' . PHP_EOL, $body);
     }
 
     private function showSmmCategories(
@@ -1199,6 +1561,12 @@ class BotKernel
             ],
         ]);
 
+        $this->referralService->handleSuccessfulOrder(
+            $userDbId,
+            (float)$order['price'],
+            sprintf('smm:%d', $order['id'])
+        );
+
         $this->answerCallback($callbackId, '✅');
     }
 
@@ -1353,6 +1721,333 @@ class BotKernel
                 ];
 
                 $this->sendMessage($chatId, $summary, $keyboard);
+                return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleReferralCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'root';
+        switch ($action) {
+            case 'withdraw':
+                $amount = $this->referralService->withdraw($userDbId);
+                if ($amount <= 0) {
+                    $this->answerCallback($callbackId, $strings['referral_no_rewards'] ?? 'No rewards to withdraw.', true);
+                    return;
+                }
+                $message = str_replace(
+                    '__amount__',
+                    number_format($amount, 2),
+                    $strings['referral_withdraw_success'] ?? 'Transferred __amount__$ to your wallet.'
+                );
+                $this->answerCallback($callbackId, '✅');
+                $this->sendMessage($chatId, $message, []);
+                $this->showReferralOverview($chatId, $messageId, $userDbId, $strings, $backLabel);
+                return;
+            case 'root':
+            default:
+                $this->showReferralOverview($chatId, $messageId, $userDbId, $strings, $backLabel);
+                return;
+        }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showReferralOverview(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $stats = $this->referralService->stats($userDbId);
+        $eligible = (float)($stats['eligible_amount'] ?? 0);
+        $text = ($strings['referral_title'] ?? 'Referral Program') . PHP_EOL . PHP_EOL;
+        $text .= str_replace(
+            ['__link__', '__code__'],
+            [$stats['link'] ?? '', $stats['code'] ?? ''],
+            $strings['referral_link_label'] ?? "Share link:\n__link__\nCode: __code__"
+        );
+        $text .= PHP_EOL . PHP_EOL;
+        $text .= str_replace(
+            ['__invited__', '__pending__', '__eligible__', '__rewarded__'],
+            [
+                (string)($stats['total'] ?? 0),
+                number_format((float)($stats['pending_count'] ?? 0), 0),
+                number_format($eligible, 2),
+                number_format((float)($stats['rewarded_amount'] ?? 0), 2),
+            ],
+            $strings['referral_stats'] ?? "Invited: __invited__\nPending: __pending__\nAvailable: __eligible__$\nPaid: __rewarded__$"
+        );
+
+        $keyboard = [];
+        if ($eligible > 0) {
+            $keyboard[] = [
+                [
+                    'text' => $strings['referral_withdraw_button'] ?? 'Withdraw earnings',
+                    'callback_data' => 'ref:withdraw',
+                ],
+            ];
+        }
+        $keyboard[] = [
+            ['text' => $strings['button_refresh'] ?? 'Refresh', 'callback_data' => 'ref:root'],
+        ];
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleAdminTicketCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $telegramUserId,
+        int $userDbId,
+        array $parts,
+        array $strings
+    ): void {
+        if (!$this->isAdmin($telegramUserId)) {
+            $this->answerCallback($callbackId, '🚫', true);
+            return;
+        }
+
+        $entity = $parts[1] ?? '';
+        if ($entity !== 'tickets') {
+            $this->answerCallback($callbackId, '❔', true);
+            return;
+        }
+
+        $action = $parts[2] ?? 'list';
+        $arg = $parts[3] ?? null;
+
+        switch ($action) {
+            case 'view':
+                $ticketId = (int)$arg;
+                $this->showTicketConversation(
+                    $chatId,
+                    $messageId,
+                    $ticketId,
+                    $strings,
+                    $strings['back'] ?? 'Back',
+                    'admin'
+                );
+                return;
+            case 'reply':
+                $ticketId = (int)$arg;
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $this->setTicketState($userDbId, [
+                    'state' => 'await_admin_reply',
+                    'ticket_id' => $ticketId,
+                    'role' => 'admin',
+                ]);
+                $this->answerCallback($callbackId, '✍️');
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_reply_prompt'] ?? 'Please type your reply.',
+                    []
+                );
+                return;
+            case 'close':
+                $ticketId = (int)$arg;
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket) {
+                    $this->answerCallback($callbackId, '❌', true);
+                    return;
+                }
+                $this->ticketService->updateStatus($ticketId, 'closed');
+                $this->notifications->notifyTicketUpdate($ticket, 'Ticket closed by admin.', 'admin');
+                $this->answerCallback($callbackId, '✅');
+                $this->showTicketConversation(
+                    $chatId,
+                    $messageId,
+                    $ticketId,
+                    $strings,
+                    $strings['back'] ?? 'Back',
+                    'admin'
+                );
+                return;
+            case 'list':
+            default:
+                $this->showAdminTicketList($chatId, $messageId, $strings, $arg);
+                $this->answerCallback($callbackId, '✅');
+                return;
+        }
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function showAdminTicketList(
+        int $chatId,
+        ?int $messageId,
+        array $strings,
+        ?string $statusFilter = null
+    ): void {
+        $statusFilter = $statusFilter && $statusFilter !== 'all' ? $statusFilter : null;
+        $tickets = $this->ticketService->adminTickets($statusFilter, 10);
+
+        $text = ($strings['support_ticket_list_title'] ?? 'Tickets') . PHP_EOL;
+        if ($statusFilter) {
+            $text .= strtoupper($statusFilter) . PHP_EOL;
+        }
+        if ($tickets === []) {
+            $text .= PHP_EOL . ($strings['support_ticket_list_empty'] ?? 'No tickets found.');
+        } else {
+            foreach ($tickets as $ticket) {
+                $text .= sprintf(
+                    "#%d • %s • %s\n",
+                    $ticket['id'],
+                    $ticket['subject'] ?? '-',
+                    strtoupper((string)$ticket['status'])
+                );
+            }
+        }
+
+        $keyboard = [
+            [
+                ['text' => 'Open', 'callback_data' => 'admin:tickets:list:open'],
+                ['text' => 'Pending', 'callback_data' => 'admin:tickets:list:pending'],
+                ['text' => 'Closed', 'callback_data' => 'admin:tickets:list:closed'],
+            ],
+        ];
+        foreach ($tickets as $ticket) {
+            $keyboard[] = [
+                [
+                    'text' => sprintf('#%d • %s', $ticket['id'], strtoupper((string)$ticket['status'])),
+                    'callback_data' => sprintf('admin:tickets:view:%d', $ticket['id']),
+                ],
+            ];
+        }
+
+        if ($messageId === null) {
+            $this->sendMessage($chatId, $text, $keyboard);
+        } else {
+            $this->editMessage($chatId, $messageId, $text, $keyboard);
+        }
+    }
+
+    private function handleAdminTextCommand(int $chatId, string $text, array $strings): bool
+    {
+        if (strpos($text, '/tickets') !== 0) {
+            return false;
+        }
+
+        $parts = explode(' ', trim($text));
+        $status = $parts[1] ?? null;
+        $this->showAdminTicketList($chatId, null, $strings, $status);
+
+        return true;
+    }
+
+    private function handleTicketTextInput(
+        int $chatId,
+        int $userDbId,
+        int $telegramUserId,
+        string $text,
+        array $strings
+    ): bool {
+        $state = $this->getTicketState($userDbId);
+        if (!$state) {
+            return false;
+        }
+
+        $trimmed = trim($text);
+        if ($trimmed === '') {
+            return true;
+        }
+
+        if ($trimmed === '/cancel') {
+            $this->clearTicketState($userDbId);
+            $this->sendMessage($chatId, $strings['support_input_cancelled'] ?? 'Operation cancelled.', []);
+            return true;
+        }
+
+        switch ($state['state'] ?? '') {
+            case 'await_subject':
+                $state['subject'] = $trimmed;
+                $state['state'] = 'await_message';
+                $this->setTicketState($userDbId, $state);
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_message_prompt'] ?? 'Describe your issue.',
+                    []
+                );
+                return true;
+            case 'await_message':
+                $ticketId = $this->ticketService->open($userDbId, (string)($state['subject'] ?? 'Support'), $trimmed);
+                $ticket = $this->ticketService->find($ticketId) ?? [
+                    'id' => $ticketId,
+                    'subject' => $state['subject'] ?? 'Support',
+                    'status' => 'open',
+                ];
+                $this->notifications->notifyTicketUpdate($ticket, $trimmed, 'user');
+                $this->clearTicketState($userDbId);
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_ticket_created'] ?? 'Ticket created, our team will contact you soon.',
+                    []
+                );
+                return true;
+            case 'await_reply':
+                $ticketId = (int)($state['ticket_id'] ?? 0);
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket || (int)$ticket['user_id'] !== $userDbId) {
+                    $this->clearTicketState($userDbId);
+                    return true;
+                }
+                $this->ticketService->addMessage($ticketId, 'user', $trimmed);
+                $this->notifications->notifyTicketUpdate($ticket, $trimmed, 'user');
+                $this->clearTicketState($userDbId);
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_waiting_for_admin'] ?? 'Reply sent. Please wait for admin response.',
+                    []
+                );
+                return true;
+            case 'await_admin_reply':
+                $ticketId = (int)($state['ticket_id'] ?? 0);
+                $ticket = $this->ticketService->find($ticketId);
+                if (!$ticket) {
+                    $this->clearTicketState($userDbId);
+                    return true;
+                }
+                $this->ticketService->addMessage($ticketId, 'admin', $trimmed);
+                $this->notifications->notifyTicketUpdate($ticket, $trimmed, 'admin');
+                $user = $this->userManager->findById((int)$ticket['user_id']);
+                if ($user && !empty($user['telegram_id'])) {
+                    $this->telegram->call('sendMessage', [
+                        'chat_id' => $user['telegram_id'],
+                        'text' => $strings['support_admin_reply_notice'] ?? 'Support team replied to your ticket.',
+                    ]);
+                }
+                $this->clearTicketState($userDbId);
+                $this->sendMessage(
+                    $chatId,
+                    $strings['support_admin_reply_sent'] ?? 'Reply sent to user.',
+                    []
+                );
                 return true;
         }
 
@@ -1601,6 +2296,11 @@ class BotKernel
 
         $payload = $this->numberPurchaseSuccessPayload($strings, $country, $order, 0, 'stars');
         $this->sendMessage($chatId, $payload['text'], $payload['keyboard']);
+        $this->referralService->handleSuccessfulOrder(
+            $userDbId,
+            (float)$order['price_usd'],
+            sprintf('number:%d', $order['id'])
+        );
     }
 
     /**
@@ -1655,6 +2355,11 @@ class BotKernel
         ];
 
         $this->sendMessage($chatId, $text, $keyboard);
+        $this->referralService->handleSuccessfulOrder(
+            $userDbId,
+            (float)$order['price'],
+            sprintf('smm:%d', $order['id'])
+        );
     }
 
     private function getSmmState(int $userId): ?array
@@ -1682,5 +2387,29 @@ class BotKernel
             unset($this->smmFlow[$userId]);
             $this->store->persist('smm_flow', $this->smmFlow);
         }
+    }
+
+    private function getTicketState(int $userId): ?array
+    {
+        return $this->ticketFlow[$userId] ?? null;
+    }
+
+    private function setTicketState(int $userId, array $state): void
+    {
+        $this->ticketFlow[$userId] = $state;
+        $this->store->persist('support_flow', $this->ticketFlow);
+    }
+
+    private function clearTicketState(int $userId): void
+    {
+        if (isset($this->ticketFlow[$userId])) {
+            unset($this->ticketFlow[$userId]);
+            $this->store->persist('support_flow', $this->ticketFlow);
+        }
+    }
+
+    private function isAdmin(int $telegramId): bool
+    {
+        return in_array($telegramId, $this->settings->admins(), true);
     }
 }

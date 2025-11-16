@@ -8,6 +8,7 @@ use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
+use App\Domain\Referrals\ReferralService;
 use App\Domain\Payments\StarPaymentService;
 use App\Domain\Notifications\NotificationService;
 use App\Domain\Settings\ForcedSubscriptionService;
@@ -25,6 +26,7 @@ use App\Infrastructure\Repository\ServiceCategoryRepository;
 use App\Infrastructure\Repository\ServiceRepository;
 use App\Infrastructure\Repository\SmmOrderRepository;
 use App\Infrastructure\Repository\TicketRepository;
+use App\Infrastructure\Repository\ReferralRepository;
 use App\Infrastructure\Repository\StarPaymentRepository;
 use App\Infrastructure\Repository\TransactionRepository;
 use App\Infrastructure\Repository\UserRepository;
@@ -44,6 +46,7 @@ $languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php')
 $store = new JsonStore([
     'langs' => APP_BASE_PATH . '/storage/langs.json',
     'smm_flow' => APP_BASE_PATH . '/storage/smm_flow.json',
+    'support_flow' => APP_BASE_PATH . '/storage/support_flow.json',
 ]);
 $keyboardFactory = new KeyboardFactory();
 $telegram = new TelegramClient($telegramConfig);
@@ -57,6 +60,7 @@ $ticketRepository = new TicketRepository($connection);
 $serviceCategoryRepository = new ServiceCategoryRepository($connection);
 $serviceRepository = new ServiceRepository($connection);
 $smmOrderRepository = new SmmOrderRepository($connection);
+$referralRepository = new ReferralRepository($connection);
 $starPaymentRepository = new StarPaymentRepository($connection);
 $userManager = new UserManager($userRepository);
 $wallets = new WalletService($walletRepository);
@@ -96,6 +100,14 @@ $starPayments = new StarPaymentService(
     $settingsService,
     $telegram
 );
+$referralService = new ReferralService(
+    $referralRepository,
+    $wallets,
+    $transactionService,
+    $settingsService,
+    $userManager,
+    $telegramConfig['bot_username'] ?? 'SP1BOT'
+);
 
 $kernel = new BotKernel(
     $languages,
@@ -110,7 +122,11 @@ $kernel = new BotKernel(
     $forcedSubscription,
     $smmCatalog,
     $smmPurchase,
-    $starPayments
+    $starPayments,
+    $ticketService,
+    $notificationService,
+    $referralService,
+    $settingsService
 );
 
 $payload = file_get_contents('php://input');

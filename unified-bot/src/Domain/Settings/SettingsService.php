@@ -61,6 +61,35 @@ class SettingsService
     }
 
     /**
+     * @return array<int>
+     */
+    public function admins(): array
+    {
+        $config = $this->remember('admins', function (): array {
+            return $this->settings->find('admins') ?? ['ids' => []];
+        });
+
+        return array_map('intval', $config['ids'] ?? []);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function referrals(): array
+    {
+        return $this->remember('referrals', function (): array {
+            return $this->settings->find('referrals') ?? [
+                'enabled' => false,
+                'bot_username' => 'SP1BOT',
+                'reward_flat_usd' => 0.0,
+                'reward_percent' => 0.0,
+                'min_order_usd' => 0.0,
+                'max_per_user' => 0,
+            ];
+        });
+    }
+
+    /**
      * @param callable():array<string, mixed> $resolver
      * @return array<string, mixed>
      */

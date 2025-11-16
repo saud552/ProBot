@@ -72,4 +72,38 @@ class NotificationService
             'parse_mode' => 'HTML',
         ]);
     }
+
+    /**
+     * @param array<string, mixed> $ticket
+     */
+    public function notifyTicketUpdate(array $ticket, string $message, string $senderType): void
+    {
+        $config = $this->settings->notifications();
+        $channelId = $config['support_channel_id'] ?? null;
+        $admins = $this->settings->admins();
+
+        $title = $senderType === 'admin' ? '👨‍💼 Admin Reply' : '📩 User Message';
+        $text = sprintf(
+            "%s\nTicket #%d • %s\nStatus: %s\n\n%s",
+            $title,
+            $ticket['id'],
+            $ticket['subject'] ?? '-',
+            strtoupper((string)($ticket['status'] ?? 'open')),
+            $message
+        );
+
+        if ($channelId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $channelId,
+                'text' => $text,
+            ]);
+        }
+
+        foreach ($admins as $adminId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $adminId,
+                'text' => $text,
+            ]);
+        }
+    }
 }

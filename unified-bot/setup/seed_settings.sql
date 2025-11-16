@@ -26,5 +26,22 @@ INSERT INTO settings (`key`, `value`) VALUES
     JSON_OBJECT(
         'usd_per_star', 0.011
     )
+),
+(
+    'admins',
+    JSON_OBJECT(
+        'ids', JSON_ARRAY(985612253)
+    )
+),
+(
+    'referrals',
+    JSON_OBJECT(
+        'enabled', TRUE,
+        'bot_username', 'SP1BOT',
+        'reward_flat_usd', 0.5,
+        'reward_percent', 0,
+        'min_order_usd', 1,
+        'max_per_user', 500
+    )
 )
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP;

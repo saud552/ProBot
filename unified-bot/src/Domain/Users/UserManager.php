@@ -48,4 +48,14 @@ class UserManager
     {
         return $this->users->findByTelegramId($telegramId);
     }
+
+    public function findById(int $userId): ?array
+    {
+        return $this->users->findById($userId);
+    }
+
+    public function assignReferrerIfEmpty(int $userId, int $referrerId): void
+    {
+        $this->users->assignReferrerIfEmpty($userId, $referrerId);
+    }
 }

@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT UNSIGNED NOT NULL,
     type ENUM('credit','debit') NOT NULL,
-    method ENUM('manual','invite','purchase','refund','stars','external') NOT NULL,
+    method ENUM('manual','invite','purchase','refund','stars','external','smm_purchase','referral') NOT NULL,
     currency VARCHAR(10) NOT NULL,
     amount DECIMAL(18,4) NOT NULL,
     reference VARCHAR(191) NULL,
@@ -52,13 +52,21 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE TABLE IF NOT EXISTS referrals (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT UNSIGNED NOT NULL,
-    inviter_id BIGINT UNSIGNED NOT NULL,
-    bonus_amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    referrer_id BIGINT UNSIGNED NOT NULL,
+    referred_user_id BIGINT UNSIGNED NOT NULL,
+    status ENUM('pending','eligible','rewarded','blocked') NOT NULL DEFAULT 'pending',
+    reward_amount DECIMAL(12,4) NOT NULL DEFAULT 0,
+    reward_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    reward_type ENUM('signup','purchase') NOT NULL DEFAULT 'purchase',
+    order_reference VARCHAR(191) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_referrals_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_referrals_inviter FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_referrals_user (user_id)
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    rewarded_at TIMESTAMP NULL,
+    CONSTRAINT fk_referrals_referrer FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_referrals_referred FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_referrals_pair (referrer_id, referred_user_id),
+    UNIQUE KEY uk_referrals_referred (referred_user_id),
+    INDEX idx_referrals_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS settings (

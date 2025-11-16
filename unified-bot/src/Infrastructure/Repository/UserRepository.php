@@ -69,4 +69,27 @@ class UserRepository extends Repository
         $stmt = $this->pdo->prepare('UPDATE profiles SET last_seen_at = NOW() WHERE user_id = :user_id');
         $stmt->execute(['user_id' => $userId]);
     }
+
+    public function findById(int $userId): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $userId]);
+        $user = $stmt->fetch();
+
+        return $user ?: null;
+    }
+
+    public function assignReferrerIfEmpty(int $userId, int $referrerId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE profiles
+             SET referrer_id = :referrer
+             WHERE user_id = :user
+               AND (referrer_id IS NULL OR referrer_id = 0)'
+        );
+        $stmt->execute([
+            'referrer' => $referrerId,
+            'user' => $userId,
+        ]);
+    }
 }
