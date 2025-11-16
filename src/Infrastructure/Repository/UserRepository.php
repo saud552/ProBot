@@ -101,4 +101,13 @@ class UserRepository extends Repository
             'id' => $userId,
         ]);
     }
+
+    /**
+     * @return array<int, array{id: int, telegram_id: int}>
+     */
+    public function listAllTelegramIds(): array
+    {
+        $stmt = $this->pdo->query('SELECT id, telegram_id FROM users ORDER BY id ASC');
+        return $stmt->fetchAll() ?: [];
+    }
 }

@@ -49,6 +49,37 @@ class NumberCatalogService
         return $country ? $this->formatCountry($country, $languageCode) : null;
     }
 
+    public function findRaw(string $code): ?array
+    {
+        return $this->countries->find($code);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function allRaw(): array
+    {
+        return $this->countries->listAll();
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function upsert(array $payload): void
+    {
+        $this->countries->upsert($payload);
+    }
+
+    public function delete(string $code): void
+    {
+        $this->countries->remove($code);
+    }
+
+    public function setActive(string $code, bool $active): void
+    {
+        $this->countries->setActive($code, $active);
+    }
+
     /**
      * @param array<string, mixed> $country
      * @return array<string, mixed>

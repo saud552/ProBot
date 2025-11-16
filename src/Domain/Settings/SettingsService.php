@@ -62,6 +62,36 @@ class SettingsService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function general(): array
+    {
+        return $this->remember('general', function (): array {
+            return $this->settings->find('general') ?? [
+                'start_message' => null,
+                'help_text' => null,
+                'invite_points' => 0,
+                'pricing_margin_percent' => 0,
+                'transfer_fee_percent' => 0,
+                'transfer_minimum' => 0,
+            ];
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function maintenance(): array
+    {
+        return $this->remember('maintenance', function (): array {
+            return $this->settings->find('maintenance') ?? [
+                'enabled' => false,
+                'message' => null,
+            ];
+        });
+    }
+
+    /**
      * @return array<string, bool>
      */
     public function features(): array
@@ -90,6 +120,30 @@ class SettingsService
     }
 
     /**
+     * @return array<int, array{name: string, username: string|null}>
+     */
+    public function agents(): array
+    {
+        $config = $this->remember('agents', function (): array {
+            return $this->settings->find('agents') ?? ['items' => []];
+        });
+
+        $items = $config['items'] ?? [];
+        $normalized = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $normalized[] = [
+                'name' => (string)($item['name'] ?? ''),
+                'username' => isset($item['username']) && $item['username'] !== '' ? (string)$item['username'] : null,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function referrals(): array
@@ -111,6 +165,16 @@ class SettingsService
         $this->update('stars', $value);
     }
 
+    public function updateGeneral(array $value): void
+    {
+        $this->update('general', array_merge($this->general(), $value));
+    }
+
+    public function updateMaintenance(array $value): void
+    {
+        $this->update('maintenance', array_merge($this->maintenance(), $value));
+    }
+
     public function updateForcedSubscription(array $value): void
     {
         $this->update('forced_subscription', $value);
@@ -124,6 +188,11 @@ class SettingsService
     public function updateReferrals(array $value): void
     {
         $this->update('referrals', $value);
+    }
+
+    public function updateAgents(array $value): void
+    {
+        $this->update('agents', ['items' => $value['items'] ?? []]);
     }
 
     public function refresh(string $key): void

@@ -92,4 +92,12 @@ class UserManager
         $this->users->setBanStatus((int)$user['id'], $banned);
         return $this->users->findById((int)$user['id']);
     }
+
+    /**
+     * @return array<int, array{id: int, telegram_id: int}>
+     */
+    public function listAll(): array
+    {
+        return $this->users->listAllTelegramIds();
+    }
 }

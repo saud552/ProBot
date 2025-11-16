@@ -34,4 +34,59 @@ class NumberCountryRepository extends Repository
 
         return $country ?: null;
     }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listAll(): array
+    {
+        $stmt = $this->pdo->query('SELECT * FROM number_countries ORDER BY name ASC');
+        return $stmt->fetchAll() ?: [];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public function upsert(array $payload): void
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO number_countries (code, name, name_translations, price_usd, margin_percent, provider_id, is_active)
+             VALUES (:code, :name, :name_translations, :price_usd, :margin_percent, :provider_id, :is_active)
+             ON DUPLICATE KEY UPDATE
+                 name = VALUES(name),
+                 name_translations = VALUES(name_translations),
+                 price_usd = VALUES(price_usd),
+                 margin_percent = VALUES(margin_percent),
+                 provider_id = VALUES(provider_id),
+                 is_active = VALUES(is_active),
+                 updated_at = CURRENT_TIMESTAMP'
+        );
+
+        $stmt->execute([
+            'code' => strtoupper((string)$payload['code']),
+            'name' => $payload['name'],
+            'name_translations' => isset($payload['name_translations'])
+                ? json_encode($payload['name_translations'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                : null,
+            'price_usd' => $payload['price_usd'],
+            'margin_percent' => $payload['margin_percent'] ?? 0,
+            'provider_id' => $payload['provider_id'],
+            'is_active' => $payload['is_active'] ?? 1,
+        ]);
+    }
+
+    public function remove(string $code): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM number_countries WHERE code = :code');
+        $stmt->execute(['code' => strtoupper($code)]);
+    }
+
+    public function setActive(string $code, bool $active): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE number_countries SET is_active = :active WHERE code = :code');
+        $stmt->execute([
+            'active' => $active ? 1 : 0,
+            'code' => strtoupper($code),
+        ]);
+    }
 }
