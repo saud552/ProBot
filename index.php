@@ -11,6 +11,8 @@ use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Referrals\ReferralService;
 use App\Domain\Payments\StarPaymentService;
 use App\Domain\Notifications\NotificationService;
+use App\Domain\Smm\SmmCatalogService;
+use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Settings\ForcedSubscriptionService;
 use App\Domain\Settings\SettingsService;
 use App\Domain\Support\TicketService;

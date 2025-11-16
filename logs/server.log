@@ -1,0 +1,150 @@
+[Sun Nov 16 02:49:23 2025] PHP 8.3.6 Development Server (http://0.0.0.0:8080) started
+[Sun Nov 16 02:50:10 2025] 127.0.0.1:60662 Accepted
+[Sun Nov 16 02:50:10 2025] 127.0.0.1:60668 Accepted
+[Sun Nov 16 02:50:39 2025] 127.0.0.1:60668 Closing
+[Sun Nov 16 02:50:39 2025] 127.0.0.1:59792 Accepted
+[Sun Nov 16 02:51:10 2025] 127.0.0.1:60662 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:51:10 2025] 127.0.0.1:60662 Closing
+[Sun Nov 16 02:51:10 2025] 127.0.0.1:40712 Accepted
+[Sun Nov 16 02:51:15 2025] 127.0.0.1:59792 Closing
+[Sun Nov 16 02:51:15 2025] 127.0.0.1:38204 Accepted
+[Sun Nov 16 02:51:26 2025] 127.0.0.1:40712 Closing
+[Sun Nov 16 02:51:27 2025] 127.0.0.1:39044 Accepted
+[Sun Nov 16 02:51:34 2025] 127.0.0.1:38204 Closing
+[Sun Nov 16 02:51:34 2025] 127.0.0.1:55082 Accepted
+[Sun Nov 16 02:51:36 2025] 127.0.0.1:39044 Closing
+[Sun Nov 16 02:51:36 2025] 127.0.0.1:55098 Accepted
+[Sun Nov 16 02:51:43 2025] 127.0.0.1:55082 Closing
+[Sun Nov 16 02:51:43 2025] 127.0.0.1:34898 Accepted
+[Sun Nov 16 02:51:46 2025] 127.0.0.1:55098 Closing
+[Sun Nov 16 02:51:46 2025] 127.0.0.1:34904 Accepted
+[Sun Nov 16 02:51:56 2025] 127.0.0.1:34898 Closing
+[Sun Nov 16 02:51:56 2025] 127.0.0.1:51826 Accepted
+[Sun Nov 16 02:52:01 2025] 127.0.0.1:34904 Closing
+[Sun Nov 16 02:52:01 2025] 127.0.0.1:51836 Accepted
+[Sun Nov 16 02:52:05 2025] 127.0.0.1:51826 Closing
+[Sun Nov 16 02:52:05 2025] 127.0.0.1:41128 Accepted
+[Sun Nov 16 02:52:13 2025] 127.0.0.1:51836 Closing
+[Sun Nov 16 02:52:13 2025] 127.0.0.1:42784 Accepted
+[Sun Nov 16 02:52:17 2025] 127.0.0.1:41128 Closing
+[Sun Nov 16 02:52:17 2025] 127.0.0.1:42786 Accepted
+[Sun Nov 16 02:52:21 2025] 127.0.0.1:42784 Closing
+[Sun Nov 16 02:52:21 2025] 127.0.0.1:42796 Accepted
+[Sun Nov 16 02:52:23 2025] 127.0.0.1:42786 Closing
+[Sun Nov 16 02:52:23 2025] 127.0.0.1:52208 Accepted
+[Sun Nov 16 02:52:26 2025] 127.0.0.1:42796 Closing
+[Sun Nov 16 02:52:26 2025] 127.0.0.1:52216 Accepted
+[Sun Nov 16 02:52:29 2025] 127.0.0.1:52208 Closing
+[Sun Nov 16 02:52:29 2025] 127.0.0.1:52226 Accepted
+[Sun Nov 16 02:52:31 2025] 127.0.0.1:52216 Closing
+[Sun Nov 16 02:52:31 2025] 127.0.0.1:52228 Accepted
+[Sun Nov 16 02:52:35 2025] 127.0.0.1:52226 Closing
+[Sun Nov 16 02:52:35 2025] 127.0.0.1:60214 Accepted
+[Sun Nov 16 02:52:37 2025] 127.0.0.1:52228 Closing
+[Sun Nov 16 02:52:37 2025] 127.0.0.1:60220 Accepted
+[Sun Nov 16 02:52:40 2025] 127.0.0.1:60214 Closing
+[Sun Nov 16 02:52:40 2025] 127.0.0.1:60228 Accepted
+[Sun Nov 16 02:52:43 2025] 127.0.0.1:60220 Closing
+[Sun Nov 16 02:52:43 2025] 127.0.0.1:49404 Accepted
+[Sun Nov 16 02:52:47 2025] 127.0.0.1:60228 Closing
+[Sun Nov 16 02:52:47 2025] 127.0.0.1:49412 Accepted
+[Sun Nov 16 02:52:51 2025] 127.0.0.1:49404 Closing
+[Sun Nov 16 02:52:51 2025] 127.0.0.1:49424 Accepted
+[Sun Nov 16 02:52:55 2025] 127.0.0.1:49412 Closing
+[Sun Nov 16 02:52:55 2025] 127.0.0.1:34468 Accepted
+[Sun Nov 16 02:53:01 2025] 127.0.0.1:49424 Closing
+[Sun Nov 16 02:53:01 2025] 127.0.0.1:34482 Accepted
+[Sun Nov 16 02:53:40 2025] 127.0.0.1:34468 Closing
+[Sun Nov 16 02:53:40 2025] 127.0.0.1:43022 Accepted
+[Sun Nov 16 02:54:01 2025] 127.0.0.1:34482 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:54:01 2025] 127.0.0.1:34482 Closing
+[Sun Nov 16 02:54:01 2025] 127.0.0.1:53320 Accepted
+[Sun Nov 16 02:54:40 2025] 127.0.0.1:43022 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:54:40 2025] 127.0.0.1:43022 Closing
+[Sun Nov 16 02:54:40 2025] 127.0.0.1:60176 Accepted
+[Sun Nov 16 02:55:01 2025] 127.0.0.1:53320 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:55:01 2025] 127.0.0.1:53320 Closing
+[Sun Nov 16 02:55:01 2025] 127.0.0.1:55122 Accepted
+[Sun Nov 16 02:55:40 2025] 127.0.0.1:60176 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:55:40 2025] 127.0.0.1:60176 Closing
+[Sun Nov 16 02:55:40 2025] 127.0.0.1:33994 Accepted
+[Sun Nov 16 02:55:55 2025] 127.0.0.1:55122 Closing
+[Sun Nov 16 02:55:55 2025] 127.0.0.1:51446 Accepted
+[Sun Nov 16 02:56:00 2025] 127.0.0.1:33994 Closing
+[Sun Nov 16 02:56:00 2025] 127.0.0.1:51460 Accepted
+[Sun Nov 16 02:56:12 2025] 127.0.0.1:51446 Closing
+[Sun Nov 16 02:56:12 2025] 127.0.0.1:57674 Accepted
+[Sun Nov 16 02:56:17 2025] 127.0.0.1:51460 Closing
+[Sun Nov 16 02:56:17 2025] 127.0.0.1:57684 Accepted
+[Sun Nov 16 02:56:21 2025] 127.0.0.1:57674 Closing
+[Sun Nov 16 02:56:21 2025] 127.0.0.1:57700 Accepted
+[Sun Nov 16 02:56:24 2025] 127.0.0.1:57684 Closing
+[Sun Nov 16 02:56:24 2025] 127.0.0.1:33286 Accepted
+[Sun Nov 16 02:56:32 2025] 127.0.0.1:57700 Closing
+[Sun Nov 16 02:56:32 2025] 127.0.0.1:33298 Accepted
+[Sun Nov 16 02:56:44 2025] 127.0.0.1:33286 Closing
+[Sun Nov 16 02:56:44 2025] 127.0.0.1:50802 Accepted
+[Sun Nov 16 02:56:46 2025] 127.0.0.1:33298 Closing
+[Sun Nov 16 02:56:46 2025] 127.0.0.1:50814 Accepted
+[Sun Nov 16 02:56:54 2025] 127.0.0.1:50802 Closing
+[Sun Nov 16 02:56:54 2025] 127.0.0.1:33784 Accepted
+[Sun Nov 16 02:56:58 2025] 127.0.0.1:50814 Closing
+[Sun Nov 16 02:56:58 2025] 127.0.0.1:33800 Accepted
+[Sun Nov 16 02:57:31 2025] 127.0.0.1:33784 Closing
+[Sun Nov 16 02:57:31 2025] 127.0.0.1:34284 Accepted
+[Sun Nov 16 02:57:42 2025] 127.0.0.1:33800 Closing
+[Sun Nov 16 02:57:42 2025] 127.0.0.1:44008 Accepted
+[Sun Nov 16 02:57:47 2025] 127.0.0.1:34284 Closing
+[Sun Nov 16 02:57:47 2025] 127.0.0.1:39648 Accepted
+[Sun Nov 16 02:57:53 2025] 127.0.0.1:44008 Closing
+[Sun Nov 16 02:57:53 2025] 127.0.0.1:43396 Accepted
+[Sun Nov 16 02:57:57 2025] 127.0.0.1:39648 Closing
+[Sun Nov 16 02:57:57 2025] 127.0.0.1:43404 Accepted
+[Sun Nov 16 02:58:53 2025] 127.0.0.1:43396 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:58:53 2025] 127.0.0.1:43396 Closing
+[Sun Nov 16 02:58:53 2025] 127.0.0.1:41838 Accepted
+[Sun Nov 16 02:58:57 2025] 127.0.0.1:43404 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:58:57 2025] 127.0.0.1:43404 Closing
+[Sun Nov 16 02:58:57 2025] 127.0.0.1:41844 Accepted
+[Sun Nov 16 02:59:53 2025] 127.0.0.1:41838 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:59:53 2025] 127.0.0.1:41838 Closing
+[Sun Nov 16 02:59:53 2025] 127.0.0.1:58226 Accepted
+[Sun Nov 16 02:59:57 2025] 127.0.0.1:41844 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 02:59:57 2025] 127.0.0.1:41844 Closing
+[Sun Nov 16 02:59:57 2025] 127.0.0.1:58228 Accepted
+[Sun Nov 16 03:00:53 2025] 127.0.0.1:58226 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:00:53 2025] 127.0.0.1:58226 Closing
+[Sun Nov 16 03:00:53 2025] 127.0.0.1:52490 Accepted
+[Sun Nov 16 03:00:57 2025] 127.0.0.1:58228 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:00:57 2025] 127.0.0.1:58228 Closing
+[Sun Nov 16 03:00:57 2025] 127.0.0.1:52500 Accepted
+[Sun Nov 16 03:01:53 2025] 127.0.0.1:52490 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:01:53 2025] 127.0.0.1:52490 Closing
+[Sun Nov 16 03:01:53 2025] 127.0.0.1:46748 Accepted
+[Sun Nov 16 03:01:58 2025] 127.0.0.1:52500 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:01:58 2025] 127.0.0.1:52500 Closing
+[Sun Nov 16 03:01:58 2025] 127.0.0.1:46760 Accepted
+[Sun Nov 16 03:02:53 2025] 127.0.0.1:46748 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:02:53 2025] 127.0.0.1:46748 Closing
+[Sun Nov 16 03:02:53 2025] 127.0.0.1:49084 Accepted
+[Sun Nov 16 03:02:58 2025] 127.0.0.1:46760 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:02:58 2025] 127.0.0.1:46760 Closing
+[Sun Nov 16 03:02:58 2025] 127.0.0.1:49090 Accepted
+[Sun Nov 16 03:03:53 2025] 127.0.0.1:49084 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:03:53 2025] 127.0.0.1:49084 Closing
+[Sun Nov 16 03:03:53 2025] 127.0.0.1:59124 Accepted
+[Sun Nov 16 03:03:58 2025] 127.0.0.1:49090 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:03:58 2025] 127.0.0.1:49090 Closing
+[Sun Nov 16 03:03:58 2025] 127.0.0.1:59130 Accepted
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:59124 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:59124 Closing
+[Sun Nov 16 03:04:53 2025] 127.0.0.1:38926 Accepted
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:59130 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:59130 Closing
+[Sun Nov 16 03:04:58 2025] 127.0.0.1:38928 Accepted
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:38926 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:38926 Closing
+[Sun Nov 16 03:05:53 2025] 127.0.0.1:57774 Accepted
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:38928 Closed without sending a request; it was probably just an unused speculative preconnection
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:38928 Closing
+[Sun Nov 16 03:05:58 2025] 127.0.0.1:57788 Accepted
