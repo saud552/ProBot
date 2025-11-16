@@ -12,7 +12,7 @@ class NumberCountryRepository extends Repository
     public function listActive(): array
     {
         $stmt = $this->pdo->query(
-            'SELECT code, name, price_usd, margin_percent, provider_id
+            'SELECT code, name, name_translations, price_usd, margin_percent, provider_id
              FROM number_countries
              WHERE is_active = 1
              ORDER BY name ASC'
@@ -24,7 +24,7 @@ class NumberCountryRepository extends Repository
     public function find(string $code): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT code, name, price_usd, margin_percent, provider_id
+            'SELECT code, name, name_translations, price_usd, margin_percent, provider_id
              FROM number_countries
              WHERE code = :code AND is_active = 1
              LIMIT 1'

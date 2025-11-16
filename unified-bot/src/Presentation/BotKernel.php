@@ -533,7 +533,8 @@ class BotKernel
     private function numbersListPayload(array $strings, string $backLabel, int $page): array
     {
         $perPage = 6;
-        $pagination = $this->numberCatalog->paginate($page, $perPage);
+        $languageCode = $strings['_lang'] ?? null;
+        $pagination = $this->numberCatalog->paginate($page, $perPage, $languageCode);
         $items = $pagination['items'];
 
         $text = $this->numbersMenuText($strings, $strings['numbers_usd_button'] ?? 'Buy with USD');
@@ -550,8 +551,9 @@ class BotKernel
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
+            $name = $this->countryDisplayName($country);
             $row[] = [
-                'text' => sprintf('%s • $%0.2f', $country['name'], $country['price_usd']),
+                'text' => sprintf('%s • $%0.2f', $name, $country['price_usd']),
                 'callback_data' => sprintf('numbers:country:%s:%d', $country['code'], $page),
             ];
             if (count($row) === 2) {
@@ -626,7 +628,8 @@ class BotKernel
     private function numbersStarListPayload(array $strings, string $backLabel, int $page): array
     {
         $perPage = 6;
-        $pagination = $this->numberCatalog->paginate($page, $perPage);
+        $languageCode = $strings['_lang'] ?? null;
+        $pagination = $this->numberCatalog->paginate($page, $perPage, $languageCode);
         $items = $pagination['items'];
 
         $title = $strings['menu_purchase_stars'] ?? 'Buy Accounts (Stars)';
@@ -644,10 +647,11 @@ class BotKernel
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
+            $name = $this->countryDisplayName($country);
             $row[] = [
                 'text' => sprintf(
                     '%s • $%0.2f ≈ %d⭐️',
-                    $country['name'],
+                    $name,
                     $country['price_usd'],
                     $this->convertUsdToStars((float)$country['price_usd'])
                 ),
@@ -705,7 +709,8 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
-        $country = $this->numberCatalog->find($countryCode);
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode);
         if (!$country) {
             $this->editMessage(
                 $chatId,
@@ -757,7 +762,8 @@ class BotKernel
             return;
         }
 
-        $country = $this->numberCatalog->find($countryCode);
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode);
         if (!$country) {
             $this->editMessage(
                 $chatId,
@@ -773,7 +779,7 @@ class BotKernel
         $disclaimer = $strings['stars_purchase_disclaimer'] ?? 'Price: __p__ USD ≈ __s__⭐️';
         $text = str_replace(
             ['__c__', '__p__', '__s__'],
-            [$this->esc($country['name']), number_format($priceUsd, 2), (string)$stars],
+            [$this->esc($this->countryDisplayName($country)), number_format($priceUsd, 2), (string)$stars],
             $disclaimer
         );
 
@@ -819,7 +825,8 @@ class BotKernel
             return;
         }
 
-        $country = $this->numberCatalog->find($countryCode);
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode);
         if (!$country) {
             $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
             return;
@@ -840,11 +847,8 @@ class BotKernel
 
         $priceUsd = number_format((float)$country['price_usd'], 2);
         $text = $strings['stars_invoice_message'] ?? 'Price: __p__ USD ≈ __s__⭐️';
-        $text = str_replace(
-            ['__c__', '__p__', '__s__'],
-            [$this->esc($country['name']), $priceUsd, (string)$invoice['stars']],
-            $text
-        );
+        $countryName = $this->esc($this->countryDisplayName($country));
+        $text = str_replace(['__c__', '__p__', '__s__'], [$countryName, $priceUsd, (string)$invoice['stars']], $text);
 
         $keyboard = [
             [
@@ -876,7 +880,7 @@ class BotKernel
      */
     private function numberCountryText(array $strings, array $country): string
     {
-        $title = sprintf('%s (%s)', $this->esc($country['name']), $this->esc($country['code']));
+        $title = sprintf('%s (%s)', $this->esc($this->countryDisplayName($country)), $this->esc($country['code']));
         $priceLine = sprintf('%s: $%0.2f', $strings['numbers_usd_button'] ?? 'USD Price', $country['price_usd']);
         $disclaimer = $strings['disclaimer'] ?? 'By confirming you accept the purchase terms.';
 
@@ -887,7 +891,7 @@ class BotKernel
     {
         return sprintf(
             '%s (%s) • $%0.2f',
-            $this->esc($country['name']),
+            $this->esc($this->countryDisplayName($country)),
             $this->esc($country['code']),
             $country['price_usd']
         );
@@ -897,11 +901,21 @@ class BotKernel
     {
         return sprintf(
             '%s (%s) • $%0.2f ≈ %d⭐️',
-            $this->esc($country['name']),
+            $this->esc($this->countryDisplayName($country)),
             $this->esc($country['code']),
             $country['price_usd'],
             $this->convertUsdToStars((float)$country['price_usd'])
         );
+    }
+
+    private function countryDisplayName(array $country): string
+    {
+        $display = (string)($country['display_name'] ?? '');
+        if ($display !== '') {
+            return $display;
+        }
+
+        return (string)($country['name'] ?? '');
     }
 
     private function convertUsdToStars(float $price): int
@@ -927,7 +941,8 @@ class BotKernel
         int $page,
         array $strings
     ): void {
-        $country = $this->numberCatalog->find($countryCode);
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode);
         if (!$country) {
             $this->answerCallback($callbackId, $strings['no_numbers'] ?? 'Country unavailable.', true);
             return;
@@ -970,7 +985,7 @@ class BotKernel
     ): array
     {
         $successTemplate = $strings['purchase_success'] ?? 'Purchase complete for __c__ number __num__ ($__p__)';
-        $countryName = $this->esc($country['name']);
+        $countryName = $this->esc($this->countryDisplayName($country));
         $numberValue = $this->esc((string)$order['number']);
         $priceValue = number_format((float)$order['price_usd'], 2);
         $text = str_replace(
@@ -2007,8 +2022,10 @@ class BotKernel
         $codeData = $result['code'];
 
         $countryCode = strtoupper((string)$order['country_code']);
-        $country = $this->numberCatalog->find($countryCode) ?? [
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode) ?? [
             'name' => $order['country_code'],
+            'display_name' => $order['country_code'],
             'code' => $order['country_code'],
         ];
 
@@ -2018,7 +2035,7 @@ class BotKernel
             [
                 $this->esc((string)$order['number']),
                 number_format((float)$order['price_usd'], 2),
-                $this->esc($country['name']),
+                $this->esc($this->countryDisplayName($country)),
                 $this->esc((string)$codeData['code']),
                 $this->esc((string)$codeData['password']),
             ],
@@ -2783,7 +2800,8 @@ class BotKernel
     private function numbersMenuText(array $strings, ?string $headline = null): string
     {
         $title = $headline ?? ($strings['menu_purchase'] ?? 'Numbers');
-        $countries = $this->numberCatalog->list();
+        $languageCode = $strings['_lang'] ?? null;
+        $countries = $this->numberCatalog->list($languageCode);
 
         if ($countries === []) {
             $fallback = $strings['no_numbers'] ?? 'No numbers available right now.';
@@ -2794,7 +2812,7 @@ class BotKernel
         $lines = array_map(
             fn (array $country): string => sprintf(
                 '%s (%s) • $%0.2f',
-                $this->esc($country['name']),
+                $this->esc($this->countryDisplayName($country)),
                 $this->esc($country['code']),
                 $country['price_usd']
             ),
@@ -2989,9 +3007,11 @@ class BotKernel
             return;
         }
 
-        $country = $this->numberCatalog->find($countryCode) ?? [
+        $languageCode = $strings['_lang'] ?? null;
+        $country = $this->numberCatalog->find($countryCode, $languageCode) ?? [
             'code' => $countryCode,
             'name' => $meta['country_name'] ?? $countryCode,
+            'display_name' => $meta['country_name'] ?? $countryCode,
             'price_usd' => $order['price_usd'],
         ];
 

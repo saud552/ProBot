@@ -66,7 +66,16 @@ class LanguageManager
     public function strings(string $code): array
     {
         $language = $this->languages[$code] ?? $this->languages[$this->fallback];
-        return $language['strings'] ?? [];
+        $strings = $language['strings'] ?? [];
+
+        if ($code !== $this->fallback && isset($this->languages[$this->fallback]['strings'])) {
+            $fallbackStrings = $this->languages[$this->fallback]['strings'];
+            $strings = array_replace($fallbackStrings, $strings);
+        }
+
+        $strings['_lang'] = $code;
+
+        return $strings;
     }
 
     public function label(string $code, string $label, string $default = ''): string

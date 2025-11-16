@@ -17,7 +17,7 @@
 | `referrals` | تتبع الإحالات والمكافآت | `user_id FK`, `inviter_id`, `bonus_amount`, `created_at` |
 | `settings` | إعدادات عامة (اشتراك إجباري، هامش، الخ) | `key`, `value JSON`, `updated_at` |
 | `number_providers` | مزودو الأرقام (Spider Service، TG-Accounts) | `name`, `api_key`, `base_url`, `status` |
-| `number_countries` | الدول المتاحة لشراء الأرقام | `code`, `name`, `price_usd`, `provider_id`, `is_active` |
+| `number_countries` | الدول المتاحة لشراء الأرقام | `code`, `name`, `name_translations JSON`, `price_usd`, `provider_id`, `is_active` |
 | `orders_numbers` | طلبات شراء الأرقام | `id`, `user_id`, `country_code`, `price`, `currency`, `hash_code`, `status`, `metadata JSON`, `created_at` |
 | `services` | خدمات الرشق (مستمدة من TigerSpeed) | `id`, `category_id`, `provider_code`, `name`, `rate_per_1k`, `min`, `max`, `currency`, `is_active` |
 | `service_categories` | أقسام الخدمات | `id`, `code`, `name`, `caption`, `is_active` |

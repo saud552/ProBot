@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS number_providers (
 CREATE TABLE IF NOT EXISTS number_countries (
     code VARCHAR(8) NOT NULL PRIMARY KEY,
     name VARCHAR(191) NOT NULL,
+    name_translations JSON NULL,
     provider_id BIGINT UNSIGNED NOT NULL,
     price_usd DECIMAL(10,2) NOT NULL DEFAULT 0,
     margin_percent DECIMAL(5,2) NOT NULL DEFAULT 0,

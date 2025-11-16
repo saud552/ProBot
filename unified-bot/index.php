@@ -42,7 +42,7 @@ $databaseConfig = require APP_BASE_PATH . '/config/database.php';
 $providersConfig = require APP_BASE_PATH . '/config/providers.php';
 $connection = new Connection($databaseConfig);
 
-$languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php');
+$languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php', 'en');
 $store = new JsonStore([
     'langs' => APP_BASE_PATH . '/storage/langs.json',
     'smm_flow' => APP_BASE_PATH . '/storage/smm_flow.json',
