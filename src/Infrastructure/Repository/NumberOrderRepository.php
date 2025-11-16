@@ -33,7 +33,11 @@ class NumberOrderRepository extends Repository
     public function updateStatus(int $orderId, string $status, array $metadata = []): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE orders_numbers SET status = :status, metadata = :metadata, updated_at = NOW() WHERE id = :id'
+            'UPDATE orders_numbers
+             SET status = :status,
+                 metadata = :metadata,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id'
         );
 
         $stmt->execute([

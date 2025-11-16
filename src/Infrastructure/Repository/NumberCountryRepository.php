@@ -50,15 +50,17 @@ class NumberCountryRepository extends Repository
     public function upsert(array $payload): void
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO number_countries (code, name, name_translations, price_usd, margin_percent, provider_id, is_active)
-             VALUES (:code, :name, :name_translations, :price_usd, :margin_percent, :provider_id, :is_active)
-             ON DUPLICATE KEY UPDATE
-                 name = VALUES(name),
-                 name_translations = VALUES(name_translations),
-                 price_usd = VALUES(price_usd),
-                 margin_percent = VALUES(margin_percent),
-                 provider_id = VALUES(provider_id),
-                 is_active = VALUES(is_active),
+            'INSERT INTO number_countries
+                (code, name, name_translations, price_usd, margin_percent, provider_id, is_active)
+             VALUES
+                (:code, :name, :name_translations, :price_usd, :margin_percent, :provider_id, :is_active)
+             ON CONFLICT(code) DO UPDATE SET
+                 name = excluded.name,
+                 name_translations = excluded.name_translations,
+                 price_usd = excluded.price_usd,
+                 margin_percent = excluded.margin_percent,
+                 provider_id = excluded.provider_id,
+                 is_active = excluded.is_active,
                  updated_at = CURRENT_TIMESTAMP'
         );
 
@@ -83,7 +85,12 @@ class NumberCountryRepository extends Repository
 
     public function setActive(string $code, bool $active): void
     {
-        $stmt = $this->pdo->prepare('UPDATE number_countries SET is_active = :active WHERE code = :code');
+        $stmt = $this->pdo->prepare(
+            'UPDATE number_countries
+             SET is_active = :active,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE code = :code'
+        );
         $stmt->execute([
             'active' => $active ? 1 : 0,
             'code' => strtoupper($code),

@@ -25,7 +25,9 @@ class SettingsRepository extends Repository
         $stmt = $this->pdo->prepare(
             'INSERT INTO settings (`key`, `value`)
              VALUES (:key, :value)
-             ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP'
+             ON CONFLICT(`key`) DO UPDATE SET
+                 `value` = excluded.`value`,
+                 updated_at = CURRENT_TIMESTAMP'
         );
 
         $stmt->execute([
