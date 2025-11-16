@@ -118,4 +118,33 @@ class ReferralRepository extends Repository
             'rewarded_amount' => (float)($stats['rewarded_amount'] ?? 0),
         ];
     }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listByReferrer(int $referrerId, ?string $status = null, int $limit = 20): array
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM referrals
+                 WHERE referrer_id = :referrer AND status = :status
+                 ORDER BY created_at DESC
+                 LIMIT :limit'
+            );
+            $stmt->bindValue('status', $status);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM referrals
+                 WHERE referrer_id = :referrer
+                 ORDER BY created_at DESC
+                 LIMIT :limit'
+            );
+        }
+
+        $stmt->bindValue('referrer', $referrerId, PDO::PARAM_INT);
+        $stmt->bindValue('limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
 }

@@ -56,6 +56,23 @@ class SettingsService
         return $this->remember('stars', function (): array {
             return $this->settings->find('stars') ?? [
                 'usd_per_star' => 0.011,
+                'enabled' => true,
+            ];
+        });
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    public function features(): array
+    {
+        return $this->remember('features', function (): array {
+            return $this->settings->find('features') ?? [
+                'numbers_enabled' => true,
+                'smm_enabled' => true,
+                'support_enabled' => true,
+                'referrals_enabled' => true,
+                'stars_enabled' => true,
             ];
         });
     }
@@ -89,6 +106,31 @@ class SettingsService
         });
     }
 
+    public function updateStars(array $value): void
+    {
+        $this->update('stars', $value);
+    }
+
+    public function updateForcedSubscription(array $value): void
+    {
+        $this->update('forced_subscription', $value);
+    }
+
+    public function updateFeatures(array $value): void
+    {
+        $this->update('features', $value);
+    }
+
+    public function updateReferrals(array $value): void
+    {
+        $this->update('referrals', $value);
+    }
+
+    public function refresh(string $key): void
+    {
+        unset($this->cache[$key]);
+    }
+
     /**
      * @param callable():array<string, mixed> $resolver
      * @return array<string, mixed>
@@ -100,5 +142,11 @@ class SettingsService
         }
 
         return $this->cache[$key];
+    }
+
+    private function update(string $key, array $value): void
+    {
+        $this->settings->upsert($key, $value);
+        $this->cache[$key] = $value;
     }
 }

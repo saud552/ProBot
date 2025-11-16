@@ -58,4 +58,20 @@ class UserManager
     {
         $this->users->assignReferrerIfEmpty($userId, $referrerId);
     }
+
+    public function setBanStatus(int $userId, bool $banned): void
+    {
+        $this->users->setBanStatus($userId, $banned);
+    }
+
+    public function setBanStatusByTelegramId(int $telegramId, bool $banned): ?array
+    {
+        $user = $this->findByTelegramId($telegramId);
+        if (!$user) {
+            return null;
+        }
+
+        $this->users->setBanStatus((int)$user['id'], $banned);
+        return $this->users->findById((int)$user['id']);
+    }
 }

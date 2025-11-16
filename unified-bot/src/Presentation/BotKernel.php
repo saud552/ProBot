@@ -56,6 +56,14 @@ class BotKernel
      * @var array<int, array<string, mixed>>
      */
     private array $ticketFlow = [];
+    /**
+     * @var array<int, array<string, mixed>>
+     */
+    private array $adminFlow = [];
+    /**
+     * @var array<string, bool>
+     */
+    private array $features = [];
 
     public function __construct(
         LanguageManager $languages,
@@ -96,6 +104,8 @@ class BotKernel
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
         $this->ticketFlow = $this->store->load('support_flow', []);
+        $this->adminFlow = $this->store->load('admin_flow', []);
+        $this->features = $this->settings->features();
     }
 
     public function handle(array $update): void
@@ -141,11 +151,22 @@ class BotKernel
         $userDbId = (int)$userRecord['id'];
         $telegramUserId = (int)$userRecord['telegram_id'];
 
+        $this->refreshFeatures();
+
         $userLang = $this->languages->ensure($userRecord['language_code'] ?? $languageCode);
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
         $changeLabel = $this->languages->label($userLang, 'change_language', 'Change Language');
         $backLabel = $this->languages->label($userLang, 'back', 'Back');
+
+        if (!empty($userRecord['is_banned'])) {
+            $this->sendMessage(
+                $chatId,
+                $strings['user_banned'] ?? 'Access to this bot is restricted.',
+                []
+            );
+            return;
+        }
 
         if (strpos($text, '/start') === 0) {
             $payload = trim(substr($text, 6));
@@ -173,12 +194,19 @@ class BotKernel
             $this->sendMessage(
                 $chatId,
                 $strings['welcome'] ?? 'Welcome',
-                $this->keyboardFactory->mainMenu($strings, $changeLabel)
+                $this->keyboardFactory->mainMenu($strings, $changeLabel, [
+                    'features' => $this->features,
+                    'is_admin' => $this->isAdmin($telegramUserId),
+                ])
             );
             return;
         }
 
-        if ($this->isAdmin($telegramUserId) && $this->handleAdminTextCommand($chatId, $text, $strings)) {
+        if ($this->isAdmin($telegramUserId) && $this->handleAdminStateInput($chatId, $userDbId, $telegramUserId, $text, $strings)) {
+            return;
+        }
+
+        if ($this->isAdmin($telegramUserId) && $this->handleAdminTextCommand($chatId, $userDbId, $telegramUserId, $text, $strings)) {
             return;
         }
 
@@ -222,6 +250,8 @@ class BotKernel
         ]);
         $this->wallets->ensure((int)$userRecord['id'], 'USD');
 
+        $this->refreshFeatures();
+
         $userLang = $this->languages->ensure($userRecord['language_code'] ?? ($telegramUser['language_code'] ?? 'ar'));
         $this->cacheLanguage($userId, $userLang);
         $strings = $this->languages->strings($userLang);
@@ -231,11 +261,29 @@ class BotKernel
         $userDbId = (int)$userRecord['id'];
         $telegramUserId = (int)$userRecord['telegram_id'];
 
+        if (!empty($userRecord['is_banned'])) {
+            $this->answerCallback($callbackId, $strings['user_banned'] ?? 'Access to this bot is restricted.', true);
+            return;
+        }
+
         if (!$this->enforceSubscription($chatId, $telegramUserId, $strings, $callbackId)) {
             return;
         }
 
         $parts = explode(':', $data);
+        if (($parts[0] ?? '') === 'admin') {
+            $this->handleAdminPanelCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $telegramUserId,
+                $parts,
+                $strings
+            );
+            return;
+        }
+
         if (($parts[0] ?? '') === 'numbers') {
             $this->handleNumbersCallback(
                 $chatId,
@@ -320,7 +368,10 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $strings['main_menu'] ?? 'Main Menu',
-                    $this->keyboardFactory->mainMenu($strings, $changeLabel)
+                    $this->keyboardFactory->mainMenu($strings, $changeLabel, [
+                        'features' => $this->features,
+                        'is_admin' => $this->isAdmin($telegramUserId),
+                    ])
                 );
                 break;
             default:
@@ -328,7 +379,10 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $strings['main_menu'] ?? 'Main Menu',
-                    $this->keyboardFactory->mainMenu($strings, $changeLabel)
+                    $this->keyboardFactory->mainMenu($strings, $changeLabel, [
+                        'features' => $this->features,
+                        'is_admin' => $this->isAdmin($telegramUserId),
+                    ])
                 );
                 break;
         }
@@ -347,6 +401,11 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
+        if (!$this->featureEnabled('numbers')) {
+            $this->answerCallback($callbackId, $strings['feature_disabled'] ?? 'This section is disabled.', true);
+            return;
+        }
+
         $action = $parts[1] ?? 'root';
         switch ($action) {
             case 'root':
@@ -354,7 +413,7 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $this->numbersMenuText($strings),
-                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                    $this->keyboardFactory->numbersMenu($strings, $backLabel, $this->starsPaymentsEnabled())
                 );
                 return;
             case 'usd':
@@ -443,7 +502,7 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $this->numbersMenuText($strings),
-                    $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                    $this->keyboardFactory->numbersMenu($strings, $backLabel, $this->starsPaymentsEnabled())
                 );
         }
     }
@@ -632,7 +691,7 @@ class BotKernel
                 $chatId,
                 $messageId,
                 $this->numbersMenuText($strings),
-                $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                $this->keyboardFactory->numbersMenu($strings, $backLabel, $this->starsPaymentsEnabled())
             );
             return;
         }
@@ -679,7 +738,7 @@ class BotKernel
                 $chatId,
                 $messageId,
                 $this->numbersMenuText($strings),
-                $this->keyboardFactory->numbersMenu($strings, $backLabel)
+                $this->keyboardFactory->numbersMenu($strings, $backLabel, $this->starsPaymentsEnabled())
             );
             return;
         }
@@ -944,6 +1003,11 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
+        if (!$this->featureEnabled('smm')) {
+            $this->answerCallback($callbackId, $strings['feature_disabled'] ?? 'This section is disabled.', true);
+            return;
+        }
+
         $action = $parts[1] ?? 'root';
         switch ($action) {
             case 'root':
@@ -951,7 +1015,7 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $strings['main_smm_button'] ?? 'Boosting Section',
-                    $this->keyboardFactory->smmMenu($strings, $backLabel)
+                    $this->keyboardFactory->smmMenu($strings, $backLabel, $this->starsPaymentsEnabled())
                 );
                 return;
             case 'usd':
@@ -1000,7 +1064,7 @@ class BotKernel
                     $chatId,
                     $messageId,
                     $strings['main_smm_button'] ?? 'Boosting Section',
-                    $this->keyboardFactory->smmMenu($strings, $backLabel)
+                    $this->keyboardFactory->smmMenu($strings, $backLabel, $this->starsPaymentsEnabled())
                 );
                 return;
         }
@@ -1018,6 +1082,11 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
+        if (!$this->featureEnabled('support')) {
+            $this->answerCallback($callbackId, $strings['feature_disabled'] ?? 'This section is disabled.', true);
+            return;
+        }
+
         $action = $parts[1] ?? 'root';
         switch ($action) {
             case 'root':
@@ -1162,6 +1231,308 @@ class BotKernel
         ];
         $keyboard[] = [
             ['text' => $backLabel, 'callback_data' => 'support:root'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleAdminPanelCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $telegramUserId,
+        array $parts,
+        array $strings
+    ): void {
+        if (!$this->isAdmin($telegramUserId)) {
+            $this->answerCallback($callbackId, $strings['admin_only'] ?? 'Admins only.', true);
+            return;
+        }
+
+        $section = $parts[1] ?? 'root';
+        switch ($section) {
+            case 'root':
+                $this->showAdminMenu($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'tickets':
+                $this->handleAdminTicketCallback(
+                    $chatId,
+                    $messageId,
+                    $callbackId,
+                    $telegramUserId,
+                    $userDbId,
+                    array_slice($parts, 1),
+                    $strings
+                );
+                return;
+            case 'features':
+                if (($parts[2] ?? '') === 'toggle') {
+                    $this->toggleFeatureFlag($parts[3] ?? '', $strings);
+                    $this->answerCallback($callbackId, '✅');
+                }
+                $this->showAdminFeaturesPanel($chatId, $messageId, $strings);
+                return;
+            case 'stars':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'toggle') {
+                    $this->toggleStarsPayments($strings);
+                    $this->answerCallback($callbackId, '✅');
+                    $this->showAdminStarsPanel($chatId, $messageId, $strings);
+                    return;
+                }
+                if ($action === 'setprice') {
+                    $this->setAdminState($userDbId, ['state' => 'await_star_price']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_prompt_star_price'] ?? 'Send the new USD price per single star.',
+                        []
+                    );
+                    return;
+                }
+                $this->showAdminStarsPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'forcesub':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'toggle') {
+                    $this->toggleForcedSubscription($strings);
+                    $this->answerCallback($callbackId, '✅');
+                    $this->showForcedSubscriptionPanel($chatId, $messageId, $strings);
+                    return;
+                }
+                if ($action === 'setlink') {
+                    $this->setAdminState($userDbId, ['state' => 'await_force_link']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_forcesub_link_prompt'] ?? 'Send the fallback link/channel invite.',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'setchannel') {
+                    $this->setAdminState($userDbId, ['state' => 'await_force_channel']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_forcesub_channel_prompt'] ?? 'Send channel ID and link in the format ID|https://t.me/... .',
+                        []
+                    );
+                    return;
+                }
+                $this->showForcedSubscriptionPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'referrals':
+                if (($parts[2] ?? '') === 'toggle') {
+                    $this->toggleReferralsEnabled($strings);
+                    $this->answerCallback($callbackId, '✅');
+                    $this->showAdminReferralsPanel($chatId, $messageId, $strings);
+                    return;
+                }
+                $this->showAdminReferralsPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'users':
+                $action = $parts[2] ?? 'panel';
+                if (in_array($action, ['ban', 'unban'], true)) {
+                    $userId = (int)($parts[3] ?? 0);
+                    if ($userId > 0) {
+                        $this->userManager->setBanStatus($userId, $action === 'ban');
+                        $statusLabel = $action === 'ban' ? 'banned' : 'unbanned';
+                        $this->logAdminAction(sprintf('User #%d %s', $userId, $statusLabel));
+                    }
+                    $this->answerCallback($callbackId, '✅');
+                    return;
+                }
+                $this->showAdminUsersPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            default:
+                $this->showAdminMenu($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+        }
+    }
+
+    private function showAdminMenu(int $chatId, int $messageId, array $strings): void
+    {
+        $text = $strings['admin_panel_title'] ?? 'Admin Panel';
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['admin_section_tickets'] ?? 'Tickets',
+                    'callback_data' => 'admin:tickets:list',
+                ],
+                [
+                    'text' => $strings['admin_section_users'] ?? 'Users',
+                    'callback_data' => 'admin:users',
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['admin_section_features'] ?? 'Features',
+                    'callback_data' => 'admin:features',
+                ],
+                [
+                    'text' => $strings['admin_section_stars'] ?? 'Stars',
+                    'callback_data' => 'admin:stars',
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['admin_section_forcesub'] ?? 'Forced Subscription',
+                    'callback_data' => 'admin:forcesub',
+                ],
+                [
+                    'text' => $strings['admin_section_referrals'] ?? 'Referrals',
+                    'callback_data' => 'admin:referrals',
+                ],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'back'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminFeaturesPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $labels = [
+            'numbers' => $strings['main_numbers_button'] ?? 'Numbers',
+            'smm' => $strings['main_smm_button'] ?? 'Boosting',
+            'support' => $strings['menu_support'] ?? 'Support',
+            'referrals' => $strings['menu_free_balance'] ?? 'Referrals',
+            'stars' => $strings['numbers_stars_button'] ?? 'Stars',
+        ];
+
+        $text = $strings['admin_features_title'] ?? 'Feature Toggles';
+        $keyboard = [];
+        foreach ($labels as $key => $label) {
+            $enabled = $this->featureEnabled($key);
+            $keyboard[] = [
+                [
+                    'text' => sprintf('%s: %s', $label, $enabled ? 'ON' : 'OFF'),
+                    'callback_data' => sprintf('admin:features:toggle:%s', $key),
+                ],
+            ];
+        }
+        $keyboard[] = [
+            ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminStarsPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $config = $this->settings->stars();
+        $text = ($strings['admin_stars_title'] ?? 'Stars Payments') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %s\n%s: %0.4f",
+            $strings['admin_stars_enabled_label'] ?? 'Enabled',
+            ($config['enabled'] ?? true) ? 'ON' : 'OFF',
+            $strings['admin_stars_price_label'] ?? 'USD per Star',
+            (float)($config['usd_per_star'] ?? 0.011)
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['admin_stars_toggle_button'] ?? 'Toggle',
+                    'callback_data' => 'admin:stars:toggle',
+                ],
+                [
+                    'text' => $strings['admin_stars_set_price_button'] ?? 'Set Price',
+                    'callback_data' => 'admin:stars:setprice',
+                ],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showForcedSubscriptionPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $config = $this->settings->forcedSubscription();
+        $channel = $config['channels'][0] ?? null;
+        $text = ($strings['admin_forcesub_title'] ?? 'Forced Subscription') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %s\nID: %s\nLink: %s",
+            $strings['admin_stars_enabled_label'] ?? 'Enabled',
+            ($config['enabled'] ?? false) ? 'ON' : 'OFF',
+            $channel['id'] ?? '-',
+            $channel['link'] ?? ($config['fallback_link'] ?? '-')
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['admin_forcesub_toggle_button'] ?? 'Toggle',
+                    'callback_data' => 'admin:forcesub:toggle',
+                ],
+            ],
+            [
+                [
+                    'text' => $strings['admin_forcesub_set_link_button'] ?? 'Set Link',
+                    'callback_data' => 'admin:forcesub:setlink',
+                ],
+                [
+                    'text' => $strings['admin_forcesub_set_channel_button'] ?? 'Set Channel',
+                    'callback_data' => 'admin:forcesub:setchannel',
+                ],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminReferralsPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $config = $this->settings->referrals();
+        $text = ($strings['referral_title'] ?? 'Referral Program') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %s\n%s",
+            $strings['admin_stars_enabled_label'] ?? 'Enabled',
+            ($config['enabled'] ?? false) ? 'ON' : 'OFF',
+            $strings['admin_referrals_hint'] ?? 'Use /referrals <telegram_id> to review a partner.'
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => $strings['admin_referrals_toggle_button'] ?? 'Toggle',
+                    'callback_data' => 'admin:referrals:toggle',
+                ],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminUsersPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $text = $strings['admin_users_title'] ?? "User Controls\nUse /user <telegram_id> to inspect a profile.\nUse /ban <telegram_id> or /unban <telegram_id>.";
+        $keyboard = [
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
         ];
 
         $this->editMessage($chatId, $messageId, $text, $keyboard);
@@ -1739,6 +2110,11 @@ class BotKernel
         array $strings,
         string $backLabel
     ): void {
+        if (!$this->featureEnabled('referrals')) {
+            $this->answerCallback($callbackId, $strings['feature_disabled'] ?? 'This section is disabled.', true);
+            return;
+        }
+
         $action = $parts[1] ?? 'root';
         switch ($action) {
             case 'withdraw':
@@ -1948,17 +2324,137 @@ class BotKernel
         }
     }
 
-    private function handleAdminTextCommand(int $chatId, string $text, array $strings): bool
-    {
-        if (strpos($text, '/tickets') !== 0) {
+    private function handleAdminTextCommand(
+        int $chatId,
+        int $userDbId,
+        int $telegramUserId,
+        string $text,
+        array $strings
+    ): bool {
+        if (!$this->isAdmin($telegramUserId)) {
             return false;
         }
 
-        $parts = explode(' ', trim($text));
-        $status = $parts[1] ?? null;
-        $this->showAdminTicketList($chatId, null, $strings, $status);
+        $trimmed = trim($text);
+        if ($trimmed === '') {
+            return false;
+        }
 
-        return true;
+        $parts = preg_split('/\s+/', $trimmed);
+        $command = strtolower($parts[0] ?? '');
+
+        switch ($command) {
+            case '/tickets':
+                if (($parts[1] ?? '') === 'user' && isset($parts[2])) {
+                    $this->sendTicketsForUser($chatId, $strings, $parts[2]);
+                    return true;
+                }
+                $status = $parts[1] ?? null;
+                $this->showAdminTicketList($chatId, null, $strings, $status);
+                return true;
+            case '/user':
+                if (!isset($parts[1])) {
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Usage: /user <telegram_id>', []);
+                    return true;
+                }
+                $this->sendAdminUserSummary($chatId, $strings, $parts[1]);
+                return true;
+            case '/ban':
+            case '/unban':
+                if (!isset($parts[1])) {
+                    $this->sendMessage($chatId, 'Usage: ' . $command . ' <telegram_id>', []);
+                    return true;
+                }
+                $telegramId = (int)$parts[1];
+                $user = $this->userManager->setBanStatusByTelegramId($telegramId, $command === '/ban');
+                if ($user) {
+                    $this->logAdminAction(sprintf('User #%d (%d) %s', $user['id'], $telegramId, $command === '/ban' ? 'banned' : 'unbanned'));
+                    $this->sendMessage($chatId, $strings['admin_user_updated'] ?? 'User updated.', []);
+                } else {
+                    $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+                }
+                return true;
+            case '/referrals':
+                if (!isset($parts[1])) {
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Usage: /referrals <telegram_id>', []);
+                    return true;
+                }
+                $status = $parts[2] ?? null;
+                $this->sendAdminReferralReport($chatId, $strings, $parts[1], $status);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private function handleAdminStateInput(
+        int $chatId,
+        int $userDbId,
+        int $telegramUserId,
+        string $text,
+        array $strings
+    ): bool {
+        if (!$this->isAdmin($telegramUserId)) {
+            return false;
+        }
+
+        $state = $this->getAdminState($userDbId);
+        if (!$state) {
+            return false;
+        }
+
+        $trimmed = trim($text);
+        if ($trimmed === '/cancel') {
+            $this->clearAdminState($userDbId);
+            $this->sendMessage($chatId, $strings['support_input_cancelled'] ?? 'Operation cancelled.', []);
+            return true;
+        }
+
+        switch ($state['state'] ?? '') {
+            case 'await_star_price':
+                $value = (float)$trimmed;
+                if ($value <= 0) {
+                    $this->sendMessage($chatId, $strings['admin_prompt_star_price'] ?? 'Send a value greater than 0.', []);
+                    return true;
+                }
+                $config = $this->settings->stars();
+                $config['usd_per_star'] = round($value, 4);
+                $this->settings->updateStars($config);
+                $this->clearAdminState($userDbId);
+                $this->logAdminAction(sprintf('Star price updated to %0.4f USD', $config['usd_per_star']));
+                $this->sendMessage($chatId, $strings['admin_star_price_updated'] ?? 'Star price updated.', []);
+                return true;
+            case 'await_force_link':
+                $config = $this->settings->forcedSubscription();
+                $config['fallback_link'] = $trimmed;
+                $this->settings->updateForcedSubscription($config);
+                $this->clearAdminState($userDbId);
+                $this->logAdminAction('Forced subscription link updated.');
+                $this->sendMessage($chatId, $strings['admin_forcesub_link_updated'] ?? 'Link updated.', []);
+                return true;
+            case 'await_force_channel':
+                $parts = array_map('trim', explode('|', $trimmed, 2));
+                $channelId = (int)($parts[0] ?? 0);
+                if ($channelId === 0) {
+                    $this->sendMessage($chatId, $strings['admin_forcesub_channel_prompt'] ?? 'Send channel ID and link in the format ID|https://t.me/... .', []);
+                    return true;
+                }
+                $link = $parts[1] ?? '';
+                $config = $this->settings->forcedSubscription();
+                $config['channels'] = [
+                    [
+                        'id' => $channelId,
+                        'link' => $link !== '' ? $link : ($config['fallback_link'] ?? ''),
+                    ],
+                ];
+                $this->settings->updateForcedSubscription($config);
+                $this->clearAdminState($userDbId);
+                $this->logAdminAction(sprintf('Forced subscription channel set to %d.', $channelId));
+                $this->sendMessage($chatId, $strings['admin_forcesub_channel_updated'] ?? 'Channel updated.', []);
+                return true;
+        }
+
+        return false;
     }
 
     private function handleTicketTextInput(
@@ -2052,6 +2548,168 @@ class BotKernel
         }
 
         return false;
+    }
+
+    private function sendAdminUserSummary(int $chatId, array $strings, $telegramId): void
+    {
+        $telegramId = (int)$telegramId;
+        if ($telegramId <= 0) {
+            $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+            return;
+        }
+
+        $user = $this->userManager->findByTelegramId($telegramId);
+        if (!$user) {
+            $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+            return;
+        }
+
+        $balance = $this->wallets->balance((int)$user['id'], 'USD');
+        $statusLabel = !empty($user['is_banned'])
+            ? ($strings['admin_user_status_banned'] ?? 'BANNED')
+            : ($strings['admin_user_status_active'] ?? 'ACTIVE');
+
+        $text = sprintf(
+            "User #%d\nTelegram: %d\nUsername: @%s\nLanguage: %s\nBalance: %0.2f USD\nStatus: %s",
+            $user['id'],
+            $user['telegram_id'],
+            $user['username'] ?? '-',
+            $user['language_code'] ?? '-',
+            $balance,
+            $statusLabel
+        );
+
+        $keyboard = [
+            [
+                [
+                    'text' => empty($user['is_banned'])
+                        ? ($strings['admin_user_ban_button'] ?? 'Ban User')
+                        : ($strings['admin_user_unban_button'] ?? 'Unban User'),
+                    'callback_data' => sprintf(
+                        'admin:users:%s:%d',
+                        empty($user['is_banned']) ? 'ban' : 'unban',
+                        $user['id']
+                    ),
+                ],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->sendMessage($chatId, $text, $keyboard);
+    }
+
+    private function sendTicketsForUser(int $chatId, array $strings, $identifier): void
+    {
+        $telegramId = (int)$identifier;
+        if ($telegramId <= 0) {
+            $this->sendMessage($chatId, 'Usage: /tickets user <telegram_id>', []);
+            return;
+        }
+
+        $user = $this->userManager->findByTelegramId($telegramId);
+        if (!$user) {
+            $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+            return;
+        }
+
+        $tickets = $this->ticketService->userTickets((int)$user['id'], 10);
+        $text = sprintf("Tickets for %d", $telegramId) . PHP_EOL;
+        if ($tickets === []) {
+            $text .= $strings['support_ticket_list_empty'] ?? 'No tickets yet.';
+        } else {
+            foreach ($tickets as $ticket) {
+                $text .= sprintf(
+                    "#%d • %s • %s\n",
+                    $ticket['id'],
+                    $ticket['subject'] ?? '-',
+                    strtoupper((string)$ticket['status'])
+                );
+            }
+        }
+
+        $this->sendMessage($chatId, $text, []);
+    }
+
+    private function sendAdminReferralReport(int $chatId, array $strings, $identifier, ?string $status = null): void
+    {
+        $telegramId = (int)$identifier;
+        if ($telegramId <= 0) {
+            $this->sendMessage($chatId, 'Usage: /referrals <telegram_id>', []);
+            return;
+        }
+
+        $details = $this->referralService->detailsByTelegram($telegramId, $status);
+        if (!$details) {
+            $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+            return;
+        }
+
+        $stats = $details['stats'];
+        $text = sprintf(
+            "Referrals for %d\nInvited: %d\nEligible: %0.2f\nPaid: %0.2f",
+            $telegramId,
+            $stats['total'] ?? 0,
+            $stats['eligible_amount'] ?? 0,
+            $stats['rewarded_amount'] ?? 0
+        );
+        $text .= PHP_EOL . '---' . PHP_EOL;
+        foreach ($details['items'] as $item) {
+            $text .= sprintf(
+                "#%d • user %d • %s • %0.2f USD\n",
+                $item['id'],
+                $item['referred_user_id'],
+                strtoupper((string)$item['status']),
+                (float)$item['reward_amount']
+            );
+        }
+
+        $this->sendMessage($chatId, $text, []);
+    }
+
+    private function toggleFeatureFlag(string $feature, array $strings): void
+    {
+        $allowed = ['numbers', 'smm', 'support', 'referrals', 'stars'];
+        if (!in_array($feature, $allowed, true)) {
+            return;
+        }
+
+        $key = $feature . '_enabled';
+        $features = $this->features;
+        $features[$key] = !($features[$key] ?? true);
+        $this->settings->updateFeatures($features);
+        $this->refreshFeatures();
+        $this->logAdminAction(sprintf('Feature %s %s', $feature, $features[$key] ? 'enabled' : 'disabled'));
+    }
+
+    private function toggleStarsPayments(array $strings): void
+    {
+        $config = $this->settings->stars();
+        $config['enabled'] = !($config['enabled'] ?? true);
+        $this->settings->updateStars($config);
+        $this->logAdminAction(sprintf('Stars payments %s', ($config['enabled'] ?? true) ? 'enabled' : 'disabled'));
+    }
+
+    private function toggleForcedSubscription(array $strings): void
+    {
+        $config = $this->settings->forcedSubscription();
+        $config['enabled'] = !($config['enabled'] ?? false);
+        $this->settings->updateForcedSubscription($config);
+        $this->logAdminAction(sprintf('Forced subscription %s', ($config['enabled'] ?? false) ? 'enabled' : 'disabled'));
+    }
+
+    private function toggleReferralsEnabled(array $strings): void
+    {
+        $config = $this->settings->referrals();
+        $config['enabled'] = !($config['enabled'] ?? false);
+        $this->settings->updateReferrals($config);
+        $this->logAdminAction(sprintf('Referrals %s', ($config['enabled'] ?? false) ? 'enabled' : 'disabled'));
+    }
+
+    private function logAdminAction(string $message): void
+    {
+        $this->notifications->notifyAdminAction($message);
     }
 
     private function determineLanguage(int $userId, string $preferred): string
@@ -2411,5 +3069,41 @@ class BotKernel
     private function isAdmin(int $telegramId): bool
     {
         return in_array($telegramId, $this->settings->admins(), true);
+    }
+
+    private function refreshFeatures(): void
+    {
+        $this->features = $this->settings->features();
+    }
+
+    private function featureEnabled(string $feature): bool
+    {
+        $key = $feature . '_enabled';
+        return ($this->features[$key] ?? true) === true;
+    }
+
+    private function starsPaymentsEnabled(): bool
+    {
+        $stars = $this->settings->stars();
+        return $this->featureEnabled('stars') && ($stars['enabled'] ?? true) === true;
+    }
+
+    private function getAdminState(int $userId): ?array
+    {
+        return $this->adminFlow[$userId] ?? null;
+    }
+
+    private function setAdminState(int $userId, array $state): void
+    {
+        $this->adminFlow[$userId] = $state;
+        $this->store->persist('admin_flow', $this->adminFlow);
+    }
+
+    private function clearAdminState(int $userId): void
+    {
+        if (isset($this->adminFlow[$userId])) {
+            unset($this->adminFlow[$userId]);
+            $this->store->persist('admin_flow', $this->adminFlow);
+        }
     }
 }

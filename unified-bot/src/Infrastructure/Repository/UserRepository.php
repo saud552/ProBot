@@ -92,4 +92,13 @@ class UserRepository extends Repository
             'user' => $userId,
         ]);
     }
+
+    public function setBanStatus(int $userId, bool $banned): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE users SET is_banned = :banned WHERE id = :id');
+        $stmt->execute([
+            'banned' => $banned ? 1 : 0,
+            'id' => $userId,
+        ]);
+    }
 }

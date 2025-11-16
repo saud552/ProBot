@@ -36,6 +36,7 @@ class StarPaymentService
         float $priceUsd,
         array $strings
     ): array {
+        $this->guardStarsEnabled();
         $stars = $this->calculateStars($priceUsd);
         $payload = $this->generatePayload();
         $meta = [
@@ -86,6 +87,7 @@ class StarPaymentService
         float $priceUsd,
         array $strings
     ): array {
+        $this->guardStarsEnabled();
         $stars = $this->calculateStars($priceUsd);
         $payload = $this->generatePayload();
         $meta = [
@@ -149,6 +151,15 @@ class StarPaymentService
     {
         $starsSettings = $this->settings->stars();
         return max(0.0001, (float)($starsSettings['usd_per_star'] ?? 0.011));
+    }
+
+    private function guardStarsEnabled(): void
+    {
+        $stars = $this->settings->stars();
+        $features = $this->settings->features();
+        if (($features['stars_enabled'] ?? true) !== true || ($stars['enabled'] ?? true) !== true) {
+            throw new RuntimeException('Stars payments are disabled.');
+        }
     }
 
     private function calculateStars(float $priceUsd): int

@@ -24,7 +24,8 @@ INSERT INTO settings (`key`, `value`) VALUES
 (
     'stars',
     JSON_OBJECT(
-        'usd_per_star', 0.011
+        'usd_per_star', 0.011,
+        'enabled', TRUE
     )
 ),
 (
@@ -42,6 +43,16 @@ INSERT INTO settings (`key`, `value`) VALUES
         'reward_percent', 0,
         'min_order_usd', 1,
         'max_per_user', 500
+    )
+),
+(
+    'features',
+    JSON_OBJECT(
+        'numbers_enabled', TRUE,
+        'smm_enabled', TRUE,
+        'support_enabled', TRUE,
+        'referrals_enabled', TRUE,
+        'stars_enabled', TRUE
     )
 )
 ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP;

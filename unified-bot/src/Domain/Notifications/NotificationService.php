@@ -106,4 +106,23 @@ class NotificationService
             ]);
         }
     }
+
+    public function notifyAdminAction(string $message): void
+    {
+        $config = $this->settings->notifications();
+        $channelId = $config['support_channel_id'] ?? null;
+        if ($channelId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $channelId,
+                'text' => "🛠️ Admin Action\n" . $message,
+            ]);
+        }
+
+        foreach ($this->settings->admins() as $adminId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $adminId,
+                'text' => "🛠️ Admin Action\n" . $message,
+            ]);
+        }
+    }
 }

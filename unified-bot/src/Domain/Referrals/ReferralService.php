@@ -183,6 +183,33 @@ class ReferralService
         return $stats;
     }
 
+    public function statsWithDetails(int $referrerId, ?string $status = null, int $limit = 20): array
+    {
+        return [
+            'stats' => $this->stats($referrerId),
+            'items' => $this->referrals->listByReferrer($referrerId, $status, $limit),
+        ];
+    }
+
+    public function detailsByTelegram(int $telegramId, ?string $status = null, int $limit = 20): ?array
+    {
+        $user = $this->users->findByTelegramId($telegramId);
+        if (!$user) {
+            return null;
+        }
+
+        return [
+            'user' => $user,
+            'stats' => $this->stats((int)$user['id']),
+            'items' => $this->referrals->listByReferrer((int)$user['id'], $status, $limit),
+        ];
+    }
+
+    public function isEnabled(): bool
+    {
+        return ($this->settings->referrals()['enabled'] ?? false) === true;
+    }
+
     public function generateShareLink(int $userId): string
     {
         $username = $this->settings->referrals()['bot_username'] ?? $this->fallbackBotUsername;
