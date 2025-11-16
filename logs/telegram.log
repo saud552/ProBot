@@ -9,3 +9,4 @@
 [2025-11-16T02:56:31+00:00] sendMessage: API error (400): Bad Request: chat not found
 [2025-11-16T02:56:43+00:00] sendMessage: API error (400): Bad Request: chat not found
 [2025-11-16T02:57:47+00:00] editMessageText: API error (400): Bad Request: can't parse entities: Unsupported start tag "معرف" at byte offset 74
+[2025-11-16T02:57:57+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
