@@ -74,6 +74,9 @@ class SettingsService
                 'pricing_margin_percent' => 0,
                 'transfer_fee_percent' => 0,
                 'transfer_minimum' => 0,
+                'charge_link' => null,
+                'support_link' => null,
+                'activation_link' => null,
             ];
         });
     }
