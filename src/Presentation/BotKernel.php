@@ -394,6 +394,18 @@ class BotKernel
                     $backLabel
                 );
                 break;
+            case 'requestPoint':
+                $this->showRechargeInfo($chatId, $messageId, $userDbId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
+            case 'agents':
+                $this->showPublicAgents($chatId, $messageId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
+            case 'activations':
+                $this->showActivationsInfo($chatId, $messageId, $userDbId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
             case 'changeLanguage':
                 $this->showLanguageMenu($chatId, $messageId, $strings, $backLabel);
                 break;
@@ -3235,6 +3247,137 @@ class BotKernel
         ];
 
         $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showRechargeInfo(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $template = $strings['charge_info'] ?? '';
+        if ($template === '') {
+            $template = $strings['menu_recharge'] ?? 'Recharge your balance.';
+        }
+
+        $text = trim($this->renderUserTemplate($template, $userDbId));
+        if ($text === '') {
+            $text = $strings['menu_recharge'] ?? 'Recharge your balance.';
+        }
+
+        $keyboard = [];
+        $chargeLink = $this->generalLink('charge_link');
+        if ($chargeLink) {
+            $keyboard[] = [
+                [
+                    'text' => $strings['menu_recharge'] ?? 'Recharge',
+                    'url' => $chargeLink,
+                ],
+            ];
+        }
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showPublicAgents(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $agents = $this->settings->agents();
+        $lines = [];
+        foreach ($agents as $index => $agent) {
+            $label = sprintf('%d. %s', $index + 1, $agent['name']);
+            if (!empty($agent['username'])) {
+                $label .= ' (@' . ltrim((string)$agent['username'], '@') . ')';
+            }
+            $lines[] = $label;
+        }
+
+        $text = $strings['menu_agents'] ?? 'Agents';
+        $text .= PHP_EOL . PHP_EOL;
+        $text .= $lines !== [] ? implode(PHP_EOL, $lines) : ($strings['no_agents'] ?? 'No agents available.');
+
+        $keyboard = [
+            [
+                ['text' => $backLabel, 'callback_data' => 'back'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, trim($text), $keyboard);
+    }
+
+    private function showActivationsInfo(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $activationLink = $this->generalLink('activation_link');
+        $text = $strings['menu_bot_activations'] ?? 'Bot Activations';
+
+        $keyboard = [];
+        if ($activationLink) {
+            $text .= PHP_EOL . PHP_EOL . $activationLink;
+            $keyboard[] = [
+                [
+                    'text' => $strings['menu_bot_activations'] ?? 'Bot Activations',
+                    'url' => $activationLink,
+                ],
+            ];
+        } else {
+            $fallback = $strings['support_info'] ?? '';
+            if ($fallback !== '') {
+                $text .= PHP_EOL . PHP_EOL . $this->renderUserTemplate($fallback, $userDbId);
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function renderUserTemplate(string $template, int $userDbId): string
+    {
+        if ($template === '') {
+            return '';
+        }
+
+        $general = $this->settings->general();
+        $chargeLink = (string)($general['charge_link'] ?? '');
+        $supportLink = (string)($general['support_link'] ?? '');
+        $invitePoints = (string)($general['invite_points'] ?? 0);
+
+        $refLink = '';
+        if ($userDbId > 0) {
+            try {
+                $refLink = $this->referralService->generateShareLink($userDbId);
+            } catch (RuntimeException $e) {
+                $refLink = '';
+            }
+        }
+
+        return strtr($template, [
+            '{{charge_link}}' => $chargeLink,
+            '{{support_link}}' => $supportLink,
+            '{{invite_point}}' => $invitePoints,
+            '{{ref_link}}' => $refLink,
+        ]);
+    }
+
+    private function generalLink(string $key): ?string
+    {
+        $value = $this->settings->general()[$key] ?? '';
+        $value = is_string($value) ? trim($value) : '';
+        return $value !== '' ? $value : null;
     }
 
     /**
