@@ -1,2 +1,7 @@
 [2025-11-16T02:42:19+00:00] getChatMember: API error (404): Not Found
 [2025-11-16T02:42:19+00:00] sendMessage: API error (404): Not Found
+[2025-11-16T02:52:05+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-16T02:52:13+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-16T02:52:21+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-16T02:52:23+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-16T02:52:47+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
