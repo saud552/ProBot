@@ -3695,9 +3695,15 @@ class BotKernel
                     $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send the country code to remove.', []);
                     return true;
                 }
-                $this->numberCatalog->delete($code);
+                $existingOrders = $this->numberOrders->countByCountry($code);
+                if ($existingOrders > 0) {
+                    $this->numberCatalog->setActive($code, false);
+                    $this->sendMessage($chatId, $strings['admin_catalog_deactivated'] ?? 'Country disabled because it has existing orders.', []);
+                } else {
+                    $this->numberCatalog->delete($code);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
                 $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
                 return true;
             case 'await_country_import':
                 $lines = preg_split('/\R+/', $trimmed);
@@ -3742,9 +3748,15 @@ class BotKernel
                     $this->sendMessage($chatId, $strings['admin_smm_category_remove_prompt'] ?? 'Send the category code to remove.', []);
                     return true;
                 }
-                $this->smmCatalog->deleteCategory($code);
+                $services = array_filter($this->smmCatalog->allServices(), fn (array $service): bool => strcasecmp((string)$service['category_id'], $code) === 0);
+                if ($services !== []) {
+                    $this->smmCatalog->setCategoryActive($code, false);
+                    $this->sendMessage($chatId, $strings['admin_smm_category_disabled'] ?? 'Category disabled because it still has services/orders.', []);
+                } else {
+                    $this->smmCatalog->deleteCategory($code);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
                 $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
                 return true;
             case 'await_smm_service_add':
                 $parts = array_map('trim', explode('|', $trimmed));
@@ -3774,9 +3786,16 @@ class BotKernel
                     $this->sendMessage($chatId, $strings['admin_smm_service_remove_prompt'] ?? 'Send the service ID to remove.', []);
                     return true;
                 }
-                $this->smmCatalog->deleteService((int)$trimmed);
+                $serviceId = (int)$trimmed;
+                $existingOrders = $this->smmOrders->countByService($serviceId);
+                if ($existingOrders > 0) {
+                    $this->smmCatalog->setServiceActive($serviceId, false);
+                    $this->sendMessage($chatId, $strings['admin_smm_service_disabled'] ?? 'Service disabled because it has existing orders.', []);
+                } else {
+                    $this->smmCatalog->deleteService($serviceId);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
                 $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
                 return true;
             case 'await_referral_config':
                 $parts = array_map('trim', explode('|', $trimmed));

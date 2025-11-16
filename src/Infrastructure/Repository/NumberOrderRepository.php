@@ -51,4 +51,24 @@ class NumberOrderRepository extends Repository
 
         return $order ?: null;
     }
+
+    public function countByCountry(string $countryCode, ?string $status = null): int
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_numbers WHERE country_code = :code AND status = :status'
+            );
+            $stmt->execute([
+                'code' => strtoupper($countryCode),
+                'status' => $status,
+            ]);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_numbers WHERE country_code = :code'
+            );
+            $stmt->execute(['code' => strtoupper($countryCode)]);
+        }
+
+        return (int)$stmt->fetchColumn();
+    }
 }

@@ -55,4 +55,24 @@ class SmmOrderRepository extends Repository
 
         return $order ?: null;
     }
+
+    public function countByService(int $serviceId, ?string $status = null): int
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_smm WHERE service_id = :service AND status = :status'
+            );
+            $stmt->execute([
+                'service' => $serviceId,
+                'status' => $status,
+            ]);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_smm WHERE service_id = :service'
+            );
+            $stmt->execute(['service' => $serviceId]);
+        }
+
+        return (int)$stmt->fetchColumn();
+    }
 }
