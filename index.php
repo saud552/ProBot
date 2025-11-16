@@ -129,7 +129,10 @@ $kernel = new BotKernel(
     $ticketService,
     $notificationService,
     $referralService,
-    $settingsService
+    $settingsService,
+    $transactionService,
+    $orderRepository,
+    $smmOrderRepository
 );
 
 $payload = file_get_contents('php://input');

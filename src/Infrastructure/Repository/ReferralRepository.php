@@ -147,4 +147,18 @@ class ReferralRepository extends Repository
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
+
+    public function revertByReference(string $reference): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE referrals
+             SET status = "pending",
+                 reward_amount = 0,
+                 reward_currency = reward_currency,
+                 order_reference = NULL,
+                 updated_at = NOW()
+             WHERE order_reference = :reference AND status IN ("pending","eligible")'
+        );
+        $stmt->execute(['reference' => $reference]);
+    }
 }

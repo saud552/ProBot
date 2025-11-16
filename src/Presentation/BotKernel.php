@@ -18,7 +18,10 @@ use App\Domain\Settings\SettingsService;
 use App\Domain\Support\TicketService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
+use App\Domain\Wallet\TransactionService;
 use App\Infrastructure\Storage\JsonStore;
+use App\Infrastructure\Repository\NumberOrderRepository;
+use App\Infrastructure\Repository\SmmOrderRepository;
 use App\Infrastructure\Telegram\TelegramClient;
 use App\Presentation\Keyboard\KeyboardFactory;
 use RuntimeException;
@@ -43,6 +46,9 @@ class BotKernel
     private NotificationService $notifications;
     private ReferralService $referralService;
     private SettingsService $settings;
+    private TransactionService $transactions;
+    private NumberOrderRepository $numberOrders;
+    private SmmOrderRepository $smmOrders;
 
     /**
      * @var array<int, string>
@@ -82,7 +88,10 @@ class BotKernel
         TicketService $ticketService,
         NotificationService $notifications,
         ReferralService $referralService,
-        SettingsService $settings
+        SettingsService $settings,
+        TransactionService $transactions,
+        NumberOrderRepository $numberOrders,
+        SmmOrderRepository $smmOrders
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -101,6 +110,9 @@ class BotKernel
         $this->notifications = $notifications;
         $this->referralService = $referralService;
         $this->settings = $settings;
+        $this->transactions = $transactions;
+        $this->numberOrders = $numberOrders;
+        $this->smmOrders = $smmOrders;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
         $this->ticketFlow = $this->store->load('support_flow', []);
@@ -1366,9 +1378,9 @@ class BotKernel
                     return;
                 }
                 if ($action === 'refund') {
-                    $this->setAdminState($userDbId, ['state' => 'await_wallet_refund_user']);
+                    $this->setAdminState($userDbId, ['state' => 'await_wallet_refund_reference']);
                     $this->answerCallback($callbackId, '✍️');
-                    $this->sendMessage($chatId, $strings['admin_prompt_wallet_user'] ?? 'Send the Telegram ID for the user.', []);
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_reference_prompt'] ?? 'Send the order reference as numbers:123 or smm:45.', []);
                     return;
                 }
                 $this->showAdminWalletPanel($chatId, $messageId, $strings);
@@ -2111,10 +2123,12 @@ class BotKernel
     private function completeWalletAdjustment(
         int $chatId,
         int $adminUserId,
+        int $adminTelegramId,
         array $state,
         float $amount,
         string $mode,
-        array $strings
+        array $strings,
+        array $options = []
     ): void {
         $targetUserId = $state['target_user_id'] ?? null;
         $targetTelegramId = $state['target_telegram_id'] ?? null;
@@ -2125,17 +2139,30 @@ class BotKernel
             return;
         }
 
+        $currency = $options['currency'] ?? 'USD';
         try {
             if ($mode === 'debit') {
-                $this->wallets->debit((int)$targetUserId, $amount, 'USD');
+                $this->wallets->debit((int)$targetUserId, $amount, $currency);
             } else {
-                $this->wallets->credit((int)$targetUserId, $amount, 'USD');
+                $this->wallets->credit((int)$targetUserId, $amount, $currency);
             }
         } catch (Throwable $e) {
             $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
             $this->clearAdminState($adminUserId);
             return;
         }
+
+        $this->recordAdminTransaction(
+            (int)$targetUserId,
+            $mode === 'debit' ? 'debit' : 'credit',
+            $amount,
+            $currency,
+            $mode,
+            [
+                'admin_user_id' => $adminUserId,
+                'admin_telegram_id' => $adminTelegramId,
+            ]
+        );
 
         $actionText = $mode === 'debit'
             ? ($strings['admin_wallet_debit_done'] ?? 'Debited %0.2f USD from %d.')
@@ -2161,6 +2188,14 @@ class BotKernel
             'chat_id' => $targetTelegramId,
             'text' => sprintf($userMessage, $amount),
         ]);
+
+        $this->logAdminAction(sprintf(
+            'Wallet %s %0.2f %s for user #%d',
+            $mode,
+            $amount,
+            $currency,
+            $targetTelegramId
+        ));
 
         $this->clearAdminState($adminUserId);
     }
@@ -3255,43 +3290,53 @@ class BotKernel
                 $this->completeWalletAdjustment(
                     $chatId,
                     $userDbId,
+                    $telegramUserId,
                     $state,
                     (float)$trimmed,
                     $state['mode'] ?? 'credit',
                     $strings
                 );
                 return true;
-            case 'await_wallet_refund_user':
-                $telegramId = (int)preg_replace('/\D+/', '', $trimmed);
-                if ($telegramId <= 0) {
-                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+            case 'await_wallet_refund_reference':
+                $parsed = $this->parseRefundReference($trimmed);
+                if ($parsed === null) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_invalid'] ?? 'Please follow the format numbers:ID or smm:ID.', []);
                     return true;
                 }
-                $user = $this->userManager->findByTelegramId($telegramId);
-                if (!$user) {
-                    $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+                $details = $this->resolveRefundDetails($parsed['type'], $parsed['id']);
+                if ($details === null) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_not_found'] ?? 'Order not found.', []);
                     return true;
                 }
-                $state['state'] = 'await_wallet_refund_amount';
-                $state['target_user_id'] = (int)$user['id'];
-                $state['target_telegram_id'] = $telegramId;
+                if ($details['already_refunded']) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_already'] ?? 'This order has already been processed.', []);
+                    return true;
+                }
+                $state['state'] = 'await_wallet_refund_confirm';
+                $state['refund_details'] = $details;
                 $this->setAdminState($userDbId, $state);
-                $this->sendMessage($chatId, $strings['admin_wallet_amount_prompt'] ?? 'Send the amount in USD.', []);
+                $this->sendMessage(
+                    $chatId,
+                    sprintf(
+                        $strings['admin_wallet_refund_confirm'] ?? 'Refund %0.2f USD for %s. Reply CONFIRM to proceed or /cancel to abort.',
+                        $details['amount'],
+                        strtoupper($details['reference'])
+                    ),
+                    []
+                );
                 return true;
-            case 'await_wallet_refund_amount':
-                if (!is_numeric($trimmed) || (float)$trimmed <= 0) {
-                    $this->sendMessage($chatId, $strings['admin_wallet_invalid_amount'] ?? 'Send a positive numeric amount.', []);
+            case 'await_wallet_refund_confirm':
+                if (strcasecmp($trimmed, 'confirm') !== 0) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_confirm'] ?? 'Reply CONFIRM to proceed.', []);
                     return true;
                 }
-                $state['mode'] = 'refund';
-                $this->completeWalletAdjustment(
-                    $chatId,
-                    $userDbId,
-                    $state,
-                    (float)$trimmed,
-                    'refund',
-                    $strings
-                );
+                $details = $state['refund_details'] ?? null;
+                if (!is_array($details)) {
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+                    return true;
+                }
+                $this->finalizeOrderRefund($chatId, $userDbId, $telegramUserId, $details, $strings);
                 return true;
             case 'await_user_ban':
                 $telegramId = (int)preg_replace('/\D+/', '', $trimmed);
