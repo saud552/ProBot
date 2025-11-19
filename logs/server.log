@@ -1,0 +1,13 @@
+[Wed Nov 19 23:40:14 2025] PHP 8.3.6 Development Server (http://0.0.0.0:8080) started
+[Wed Nov 19 23:40:17 2025] 127.0.0.1:43804 Accepted
+[Wed Nov 19 23:40:17 2025] PHP Fatal error:  Uncaught RuntimeException: Telegram bot token is not configured. in /workspace/src/Infrastructure/Telegram/TelegramClient.php:20
+Stack trace:
+#0 /workspace/index.php(61): App\Infrastructure\Telegram\TelegramClient->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Telegram/TelegramClient.php on line 20
+[Wed Nov 19 23:40:17 2025] 127.0.0.1:43804 [500]: POST /index.php - Uncaught RuntimeException: Telegram bot token is not configured. in /workspace/src/Infrastructure/Telegram/TelegramClient.php:20
+Stack trace:
+#0 /workspace/index.php(61): App\Infrastructure\Telegram\TelegramClient->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Telegram/TelegramClient.php on line 20
+[Wed Nov 19 23:40:17 2025] 127.0.0.1:43804 Closing
