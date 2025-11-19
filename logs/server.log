@@ -115,3 +115,111 @@ Stack trace:
 [Wed Nov 19 23:47:05 2025] 127.0.0.1:54122 Accepted
 [Wed Nov 19 23:47:07 2025] 127.0.0.1:54122 [200]: POST /index.php
 [Wed Nov 19 23:47:07 2025] 127.0.0.1:54122 Closing
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42142 Accepted
+[Wed Nov 19 23:47:23 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42142 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42142 Closing
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42154 Accepted
+[Wed Nov 19 23:47:23 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42154 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:23 2025] 127.0.0.1:42154 Closing
+[Wed Nov 19 23:47:26 2025] 127.0.0.1:35638 Accepted
+[Wed Nov 19 23:47:26 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:26 2025] 127.0.0.1:35638 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:26 2025] 127.0.0.1:35638 Closing
+[Wed Nov 19 23:47:30 2025] 127.0.0.1:35642 Accepted
+[Wed Nov 19 23:47:30 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:30 2025] 127.0.0.1:35642 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:30 2025] 127.0.0.1:35642 Closing
+[Wed Nov 19 23:47:38 2025] 127.0.0.1:60646 Accepted
+[Wed Nov 19 23:47:38 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:38 2025] 127.0.0.1:60646 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:38 2025] 127.0.0.1:60646 Closing
+[Wed Nov 19 23:47:54 2025] 127.0.0.1:44552 Accepted
+[Wed Nov 19 23:47:54 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:54 2025] 127.0.0.1:44552 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:47:54 2025] 127.0.0.1:44552 Closing
+[Wed Nov 19 23:48:26 2025] 127.0.0.1:39040 Accepted
+[Wed Nov 19 23:48:26 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:48:26 2025] 127.0.0.1:39040 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:48:26 2025] 127.0.0.1:39040 Closing
+[Wed Nov 19 23:49:31 2025] 127.0.0.1:51174 Accepted
+[Wed Nov 19 23:49:31 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:49:31 2025] 127.0.0.1:51174 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:49:31 2025] 127.0.0.1:51174 Closing
+[Wed Nov 19 23:51:22 2025] 127.0.0.1:35106 Accepted
+[Wed Nov 19 23:51:22 2025] PHP Fatal error:  Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:51:22 2025] 127.0.0.1:35106 [500]: POST /index.php - Uncaught RuntimeException: Spider provider configuration is invalid. in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php:23
+Stack trace:
+#0 /workspace/index.php(77): App\Infrastructure\Numbers\SpiderNumberProvider->__construct()
+#1 {main}
+  thrown in /workspace/src/Infrastructure/Numbers/SpiderNumberProvider.php on line 23
+[Wed Nov 19 23:51:22 2025] 127.0.0.1:35106 Closing
