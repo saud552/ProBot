@@ -14,8 +14,12 @@ class OrbitexaProvider implements SmmProviderInterface
 
     public function __construct(array $config)
     {
-        $this->baseUrl = $config['base_url'] ?? 'https://orbitexa.com/api/v2';
+        $this->baseUrl = $config['base_url'] ?? '';
         $this->apiKey = $config['api_key'] ?? '';
+
+        if ($this->baseUrl === '' || $this->apiKey === '') {
+            throw new RuntimeException('Orbitexa provider configuration is invalid.');
+        }
     }
 
     /**
@@ -23,9 +27,6 @@ class OrbitexaProvider implements SmmProviderInterface
      */
     public function placeOrder(array $payload): array
     {
-        if ($this->apiKey === '') {
-            throw new RuntimeException('Orbitexa provider API key is not configured.');
-        }
         $post = array_merge($payload, [
             'key' => $this->apiKey,
             'action' => 'add',
