@@ -15,13 +15,9 @@ class SpiderNumberProvider implements NumberProviderInterface
 
     public function __construct(array $config)
     {
-        $this->baseUrl = rtrim($config['base_url'] ?? '', '/');
+        $this->baseUrl = rtrim($config['base_url'] ?? 'https://api.spider-service.com', '/');
         $this->apiKey = (string)($config['api_key'] ?? '');
         $this->timeout = (int)($config['timeout'] ?? 15);
-
-        if ($this->baseUrl === '' || $this->apiKey === '') {
-            throw new RuntimeException('Spider provider configuration is invalid.');
-        }
     }
 
     /**
@@ -29,6 +25,9 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestNumber(string $countryCode): array
     {
+        if ($this->apiKey === '') {
+            throw new RuntimeException('Spider provider API key is not configured.');
+        }
         $query = http_build_query([
             'apiKey' => $this->apiKey,
             'action' => 'getNumber',
@@ -68,6 +67,9 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestCode(string $hashCode): array
     {
+        if ($this->apiKey === '') {
+            throw new RuntimeException('Spider provider API key is not configured.');
+        }
         $query = http_build_query([
             'apiKey' => $this->apiKey,
             'action' => 'getCode',

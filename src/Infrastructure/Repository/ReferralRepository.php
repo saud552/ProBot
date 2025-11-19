@@ -98,15 +98,15 @@ class ReferralRepository extends Repository
     public function stats(int $referrerId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT
+            "SELECT
                 COUNT(*) AS total,
-                SUM(CASE WHEN status = ''pending'' THEN 1 ELSE 0 END) AS pending_count,
-                SUM(CASE WHEN status = ''eligible'' THEN 1 ELSE 0 END) AS eligible_count,
-                SUM(CASE WHEN status = ''rewarded'' THEN 1 ELSE 0 END) AS rewarded_count,
-                SUM(CASE WHEN status = ''eligible'' THEN reward_amount ELSE 0 END) AS eligible_amount,
-                SUM(CASE WHEN status = ''rewarded'' THEN reward_amount ELSE 0 END) AS rewarded_amount
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN status = 'eligible' THEN 1 ELSE 0 END) AS eligible_count,
+                SUM(CASE WHEN status = 'rewarded' THEN 1 ELSE 0 END) AS rewarded_count,
+                SUM(CASE WHEN status = 'eligible' THEN reward_amount ELSE 0 END) AS eligible_amount,
+                SUM(CASE WHEN status = 'rewarded' THEN reward_amount ELSE 0 END) AS rewarded_amount
              FROM referrals
-             WHERE referrer_id = :referrer'
+             WHERE referrer_id = :referrer"
         );
         $stmt->execute(['referrer' => $referrerId]);
         $stats = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -153,13 +153,13 @@ class ReferralRepository extends Repository
     public function revertByReference(string $reference): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE referrals
-             SET status = ''pending'',
+            "UPDATE referrals
+             SET status = 'pending',
                  reward_amount = 0,
                  reward_currency = reward_currency,
                  order_reference = NULL,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE order_reference = :reference AND status IN (''pending'',''eligible'')'
+             WHERE order_reference = :reference AND status IN ('pending','eligible')"
         );
         $stmt->execute(['reference' => $reference]);
     }
