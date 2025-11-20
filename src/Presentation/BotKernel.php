@@ -612,7 +612,7 @@ class BotKernel
         foreach ($items as $country) {
             $name = $this->countryDisplayName($country, $languageCode);
             $row[] = [
-                'text' => sprintf('%s • $%0.2f', $name, $country['price_usd']),
+                'text' => sprintf('%s %0.2f$', $name, $country['price_usd']),
                 'callback_data' => sprintf('numbers:country:%s:%d', $country['code'], $page),
             ];
             if (count($row) === 2) {
@@ -705,13 +705,9 @@ class BotKernel
         $row = [];
         foreach ($items as $country) {
             $name = $this->countryDisplayName($country, $languageCode);
+            $stars = $this->convertUsdToStars((float)$country['price_usd']);
             $row[] = [
-                'text' => sprintf(
-                    '%s • $%0.2f ≈ %d⭐️',
-                    $name,
-                    $country['price_usd'],
-                    $this->convertUsdToStars((float)$country['price_usd'])
-                ),
+                'text' => sprintf('%s %d⭐️', $name, $stars),
                 'callback_data' => sprintf('numbers:starscountry:%s:%d', $country['code'], $page),
             ];
             if (count($row) === 2) {
@@ -3914,15 +3910,21 @@ class BotKernel
                 // تحديث نسبة الربح لجميع الدول
                 $allCountries = $this->numberCatalog->allRaw();
                 $updated = 0;
+                // التأكد من وجود provider_id افتراضي
+                $defaultProviderId = 1;
                 foreach ($allCountries as $country) {
+                    $providerId = isset($country['provider_id']) && $country['provider_id'] > 0 
+                        ? (int)$country['provider_id'] 
+                        : $defaultProviderId;
+                    
                     $this->numberCatalog->upsert([
                         'code' => $country['code'],
                         'name' => $country['name'],
                         'name_translations' => $country['name_translations'] ?? null,
                         'price_usd' => $country['price_usd'],
                         'margin_percent' => $newMargin,
-                        'provider_id' => $country['provider_id'] ?? 1,
-                        'is_active' => $country['is_active'] ?? 1,
+                        'provider_id' => $providerId,
+                        'is_active' => isset($country['is_active']) ? (int)$country['is_active'] : 1,
                     ]);
                     $updated++;
                 }

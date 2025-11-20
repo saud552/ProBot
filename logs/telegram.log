@@ -12,3 +12,4 @@
 [2025-11-20T00:56:30+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
 [2025-11-20T00:56:37+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
 [2025-11-20T01:04:56+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-20T01:13:51+00:00] answerCallbackQuery: API error (400): Bad Request: query is too old and response timeout expired or query ID is invalid
