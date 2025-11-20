@@ -1,105 +1,15 @@
-[Thu Nov 20 01:16:45 2025] PHP 8.3.6 Development Server (http://0.0.0.0:8080) started
-[Thu Nov 20 01:16:46 2025] 127.0.0.1:51856 Accepted
-[Thu Nov 20 01:16:47 2025] 127.0.0.1:51856 Closing
-[Thu Nov 20 01:16:58 2025] 127.0.0.1:41364 Accepted
-[Thu Nov 20 01:16:58 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
+[Thu Nov 20 01:21:03 2025] PHP 8.3.6 Development Server (http://0.0.0.0:8080) started
+[Thu Nov 20 01:21:05 2025] 127.0.0.1:44162 Accepted
+[Thu Nov 20 01:21:05 2025] 127.0.0.1:44162 Closing
+[Thu Nov 20 01:21:07 2025] 127.0.0.1:44174 Accepted
+[Thu Nov 20 01:21:07 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
 Stack trace:
 #0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
 #1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
+#2 /workspace/src/Presentation/BotKernel.php(4016): App\Domain\Numbers\NumberCatalogService->upsert()
 #3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
 #4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
 #5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
 #6 {main}
   thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:16:58 2025] 127.0.0.1:41364 Closing
-[Thu Nov 20 01:16:59 2025] 127.0.0.1:41378 Accepted
-[Thu Nov 20 01:16:59 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:16:59 2025] 127.0.0.1:41378 Closing
-[Thu Nov 20 01:17:01 2025] 127.0.0.1:41394 Accepted
-[Thu Nov 20 01:17:02 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:17:02 2025] 127.0.0.1:41394 Closing
-[Thu Nov 20 01:17:03 2025] 127.0.0.1:41396 Accepted
-[Thu Nov 20 01:17:03 2025] 127.0.0.1:41396 Closing
-[Thu Nov 20 01:17:04 2025] 127.0.0.1:41412 Accepted
-[Thu Nov 20 01:17:05 2025] 127.0.0.1:41412 Closing
-[Thu Nov 20 01:17:06 2025] 127.0.0.1:42274 Accepted
-[Thu Nov 20 01:17:07 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:17:07 2025] 127.0.0.1:42274 Closing
-[Thu Nov 20 01:17:15 2025] 127.0.0.1:34648 Accepted
-[Thu Nov 20 01:17:15 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:17:15 2025] 127.0.0.1:34648 Closing
-[Thu Nov 20 01:17:31 2025] 127.0.0.1:39344 Accepted
-[Thu Nov 20 01:17:32 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:17:32 2025] 127.0.0.1:39344 Closing
-[Thu Nov 20 01:18:04 2025] 127.0.0.1:52522 Accepted
-[Thu Nov 20 01:18:05 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:18:05 2025] 127.0.0.1:52522 Closing
-[Thu Nov 20 01:18:08 2025] 127.0.0.1:52526 Accepted
-[Thu Nov 20 01:18:09 2025] 127.0.0.1:52526 Closing
-[Thu Nov 20 01:19:07 2025] 127.0.0.1:45278 Accepted
-[Thu Nov 20 01:19:07 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
-Stack trace:
-#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
-#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
-#2 /workspace/src/Presentation/BotKernel.php(4009): App\Domain\Numbers\NumberCatalogService->upsert()
-#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
-#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
-#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
-#6 {main}
-  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
-[Thu Nov 20 01:19:07 2025] 127.0.0.1:45278 Closing
+[Thu Nov 20 01:21:07 2025] 127.0.0.1:44174 Closing

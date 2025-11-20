@@ -1817,7 +1817,7 @@ class BotKernel
         }
     }
 
-    private function showAdminMenu(int $chatId, int $messageId, array $strings): void
+    private function showAdminMenu(int $chatId, ?int $messageId, array $strings): void
     {
         $text = $strings['admin_panel_title'] ?? 'Admin Panel';
         $keyboard = [
@@ -1854,7 +1854,11 @@ class BotKernel
             ],
         ];
 
-        $this->editMessage($chatId, $messageId, $text, $keyboard);
+        if ($messageId !== null) {
+            $this->editMessage($chatId, $messageId, $text, $keyboard);
+        } else {
+            $this->sendMessage($chatId, $text, $keyboard);
+        }
     }
 
     private function showAdminFeaturesPanel(int $chatId, int $messageId, array $strings): void
@@ -3672,6 +3676,9 @@ class BotKernel
         $command = strtolower($parts[0] ?? '');
 
         switch ($command) {
+            case '/admin':
+                $this->showAdminMenu($chatId, null, $strings);
+                return true;
             case '/tickets':
                 if (($parts[1] ?? '') === 'user' && isset($parts[2])) {
                     $this->sendTicketsForUser($chatId, $strings, $parts[2]);
