@@ -39,7 +39,10 @@ class WalletRepository extends Repository
     public function updateBalance(int $userId, string $currency, float $balance): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE wallets SET balance = :balance WHERE user_id = :user_id AND currency = :currency'
+            'UPDATE wallets
+             SET balance = :balance,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = :user_id AND currency = :currency'
         );
         $stmt->execute([
             'balance' => $balance,

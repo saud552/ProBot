@@ -9,6 +9,8 @@ use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
 use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Referrals\ReferralService;
+use App\Domain\Smm\SmmCatalogService;
+use App\Domain\Smm\SmmPurchaseService;
 use App\Domain\Payments\StarPaymentService;
 use App\Domain\Notifications\NotificationService;
 use App\Domain\Settings\ForcedSubscriptionService;
@@ -18,6 +20,7 @@ use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Domain\Wallet\TransactionService;
 use App\Infrastructure\Database\Connection;
+use App\Infrastructure\Database\SchemaManager;
 use App\Infrastructure\Numbers\SpiderNumberProvider;
 use App\Infrastructure\Repository\NumberCountryRepository;
 use App\Infrastructure\Repository\NumberOrderRepository;
@@ -41,6 +44,11 @@ $telegramConfig = require APP_BASE_PATH . '/config/telegram.php';
 $databaseConfig = require APP_BASE_PATH . '/config/database.php';
 $providersConfig = require APP_BASE_PATH . '/config/providers.php';
 $connection = new Connection($databaseConfig);
+SchemaManager::ensure(
+    $connection->pdo(),
+    APP_BASE_PATH . '/setup/schema.sql',
+    APP_BASE_PATH . '/setup/seed_settings.sql'
+);
 
 $languages = LanguageManager::fromFile(APP_BASE_PATH . '/lang/translations.php', 'en');
 $store = new JsonStore([
@@ -127,7 +135,11 @@ $kernel = new BotKernel(
     $ticketService,
     $notificationService,
     $referralService,
-    $settingsService
+    $settingsService,
+    $transactionService,
+    $orderRepository,
+    $smmOrderRepository,
+    $numberProvider
 );
 
 $payload = file_get_contents('php://input');

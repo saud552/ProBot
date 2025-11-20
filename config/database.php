@@ -3,10 +3,9 @@
 declare(strict_types=1);
 
 return [
-    'host' => getenv('APP_DB_HOST') ?: 'localhost',
-    'port' => (int)(getenv('APP_DB_PORT') ?: 3306),
-    'database' => getenv('APP_DB_NAME') ?: 'tigerspe_youssef',
-    'username' => getenv('APP_DB_USER') ?: 'tigerspe_youssef',
-    'password' => getenv('APP_DB_PASS') ?: 'Klash18722@',
-    'charset' => 'utf8mb4',
+    'driver' => 'sqlite',
+    'path' => getenv('APP_DB_PATH') ?: APP_BASE_PATH . '/storage/database.sqlite',
+    'foreign_keys' => getenv('APP_DB_FOREIGN_KEYS') !== '0',
+    'busy_timeout' => (int)(getenv('APP_DB_BUSY_TIMEOUT') ?: 5000),
+    'journal_mode' => getenv('APP_DB_JOURNAL_MODE') ?: 'WAL',
 ];

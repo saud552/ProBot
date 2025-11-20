@@ -231,6 +231,11 @@ class ReferralService
         return strtoupper(base_convert((string)$userId, 10, 36));
     }
 
+    public function revertRewardByReference(string $orderReference): void
+    {
+        $this->referrals->revertByReference($orderReference);
+    }
+
     private function decodeCode(string $code): ?int
     {
         $code = strtoupper(trim($code));

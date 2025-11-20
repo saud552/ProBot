@@ -22,7 +22,7 @@ class ReferralRepository extends Repository
         $stmt = $this->pdo->prepare(
             'INSERT INTO referrals (referrer_id, referred_user_id)
              VALUES (:referrer, :referred)
-             ON DUPLICATE KEY UPDATE referrer_id = referrer_id'
+             ON CONFLICT(referred_user_id) DO NOTHING'
         );
         $stmt->execute([
             'referrer' => $referrerId,
@@ -47,7 +47,7 @@ class ReferralRepository extends Repository
                  reward_amount = :amount,
                  reward_currency = :currency,
                  order_reference = :reference,
-                 updated_at = NOW()
+                 updated_at = CURRENT_TIMESTAMP
              WHERE id = :id'
         );
         $stmt->execute([
@@ -84,7 +84,9 @@ class ReferralRepository extends Repository
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->pdo->prepare(
             "UPDATE referrals
-             SET status = 'rewarded', rewarded_at = NOW(), updated_at = NOW()
+             SET status = 'rewarded',
+                 rewarded_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
              WHERE id IN ({$placeholders})"
         );
         $stmt->execute(array_map('intval', $ids));
@@ -96,15 +98,15 @@ class ReferralRepository extends Repository
     public function stats(int $referrerId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT
+            "SELECT
                 COUNT(*) AS total,
-                SUM(status = "pending") AS pending_count,
-                SUM(status = "eligible") AS eligible_count,
-                SUM(status = "rewarded") AS rewarded_count,
-                SUM(CASE WHEN status = "eligible" THEN reward_amount ELSE 0 END) AS eligible_amount,
-                SUM(CASE WHEN status = "rewarded" THEN reward_amount ELSE 0 END) AS rewarded_amount
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                SUM(CASE WHEN status = 'eligible' THEN 1 ELSE 0 END) AS eligible_count,
+                SUM(CASE WHEN status = 'rewarded' THEN 1 ELSE 0 END) AS rewarded_count,
+                SUM(CASE WHEN status = 'eligible' THEN reward_amount ELSE 0 END) AS eligible_amount,
+                SUM(CASE WHEN status = 'rewarded' THEN reward_amount ELSE 0 END) AS rewarded_amount
              FROM referrals
-             WHERE referrer_id = :referrer'
+             WHERE referrer_id = :referrer"
         );
         $stmt->execute(['referrer' => $referrerId]);
         $stats = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -146,5 +148,19 @@ class ReferralRepository extends Repository
         $stmt->execute();
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function revertByReference(string $reference): void
+    {
+        $stmt = $this->pdo->prepare(
+            "UPDATE referrals
+             SET status = 'pending',
+                 reward_amount = 0,
+                 reward_currency = reward_currency,
+                 order_reference = NULL,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE order_reference = :reference AND status IN ('pending','eligible')"
+        );
+        $stmt->execute(['reference' => $reference]);
     }
 }

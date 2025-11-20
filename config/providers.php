@@ -12,7 +12,7 @@ return [
     'smm' => [
         'orbitexa' => [
             'base_url' => getenv('ORBITEXA_BASE_URL') ?: 'https://orbitexa.com/api/v2',
-            'api_key' => getenv('ORBITEXA_API_KEY') ?: '12a8e165e0a6c14b4bd05e77f3773c61',
+            'api_key' => getenv('ORBITEXA_API_KEY') ?: '02180d7ec94ae3369e08a358a293001d',
         ],
     ],
 ];

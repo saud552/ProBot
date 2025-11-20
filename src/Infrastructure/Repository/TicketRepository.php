@@ -12,7 +12,7 @@ class TicketRepository extends Repository
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO tickets (user_id, status, subject, last_message_at)
-             VALUES (:user_id, :status, :subject, NOW())'
+             VALUES (:user_id, :status, :subject, CURRENT_TIMESTAMP)'
         );
         $stmt->execute([
             'user_id' => $userId,
@@ -39,7 +39,7 @@ class TicketRepository extends Repository
         ]);
 
         $this->pdo
-            ->prepare('UPDATE tickets SET last_message_at = NOW() WHERE id = :id')
+            ->prepare('UPDATE tickets SET last_message_at = CURRENT_TIMESTAMP WHERE id = :id')
             ->execute(['id' => $ticketId]);
     }
 
@@ -112,7 +112,7 @@ class TicketRepository extends Repository
     public function updateStatus(int $ticketId, string $status): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE tickets SET status = :status, updated_at = NOW() WHERE id = :id'
+            'UPDATE tickets SET status = :status, updated_at = CURRENT_TIMESTAMP WHERE id = :id'
         );
         $stmt->execute([
             'status' => $status,

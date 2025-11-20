@@ -52,8 +52,8 @@ class StarPaymentRepository extends Repository
              SET status = :status,
                  provider_payment_charge_id = :charge,
                  meta = :meta,
-                 fulfilled_at = NOW(),
-                 updated_at = NOW()
+                 fulfilled_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
              WHERE id = :id'
         );
         $stmt->execute([

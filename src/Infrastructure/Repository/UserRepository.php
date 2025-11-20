@@ -34,7 +34,9 @@ class UserRepository extends Repository
 
     public function updateLanguage(int $userId, string $languageCode): void
     {
-        $stmt = $this->pdo->prepare('UPDATE users SET language_code = :language WHERE id = :id');
+        $stmt = $this->pdo->prepare(
+            'UPDATE users SET language_code = :language, updated_at = CURRENT_TIMESTAMP WHERE id = :id'
+        );
         $stmt->execute([
             'language' => $languageCode,
             'id' => $userId,
@@ -48,12 +50,12 @@ class UserRepository extends Repository
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO profiles (user_id, first_name, username, referrer_id, last_seen_at)
-             VALUES (:user_id, :first_name, :username, :referrer_id, NOW())
-             ON DUPLICATE KEY UPDATE
-                 first_name = VALUES(first_name),
-                 username = VALUES(username),
-                 referrer_id = VALUES(referrer_id),
-                 last_seen_at = VALUES(last_seen_at)'
+             VALUES (:user_id, :first_name, :username, :referrer_id, CURRENT_TIMESTAMP)
+             ON CONFLICT(user_id) DO UPDATE SET
+                 first_name = excluded.first_name,
+                 username = excluded.username,
+                 referrer_id = excluded.referrer_id,
+                 last_seen_at = excluded.last_seen_at'
         );
 
         $stmt->execute([
@@ -66,7 +68,7 @@ class UserRepository extends Repository
 
     public function markLastSeen(int $userId): void
     {
-        $stmt = $this->pdo->prepare('UPDATE profiles SET last_seen_at = NOW() WHERE user_id = :user_id');
+        $stmt = $this->pdo->prepare('UPDATE profiles SET last_seen_at = CURRENT_TIMESTAMP WHERE user_id = :user_id');
         $stmt->execute(['user_id' => $userId]);
     }
 
@@ -95,10 +97,21 @@ class UserRepository extends Repository
 
     public function setBanStatus(int $userId, bool $banned): void
     {
-        $stmt = $this->pdo->prepare('UPDATE users SET is_banned = :banned WHERE id = :id');
+        $stmt = $this->pdo->prepare(
+            'UPDATE users SET is_banned = :banned, updated_at = CURRENT_TIMESTAMP WHERE id = :id'
+        );
         $stmt->execute([
             'banned' => $banned ? 1 : 0,
             'id' => $userId,
         ]);
+    }
+
+    /**
+     * @return array<int, array{id: int, telegram_id: int}>
+     */
+    public function listAllTelegramIds(): array
+    {
+        $stmt = $this->pdo->query('SELECT id, telegram_id FROM users ORDER BY id ASC');
+        return $stmt->fetchAll() ?: [];
     }
 }

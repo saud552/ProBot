@@ -33,7 +33,11 @@ class NumberOrderRepository extends Repository
     public function updateStatus(int $orderId, string $status, array $metadata = []): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE orders_numbers SET status = :status, metadata = :metadata, updated_at = NOW() WHERE id = :id'
+            'UPDATE orders_numbers
+             SET status = :status,
+                 metadata = :metadata,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id'
         );
 
         $stmt->execute([
@@ -50,5 +54,25 @@ class NumberOrderRepository extends Repository
         $order = $stmt->fetch();
 
         return $order ?: null;
+    }
+
+    public function countByCountry(string $countryCode, ?string $status = null): int
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_numbers WHERE country_code = :code AND status = :status'
+            );
+            $stmt->execute([
+                'code' => strtoupper($countryCode),
+                'status' => $status,
+            ]);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_numbers WHERE country_code = :code'
+            );
+            $stmt->execute(['code' => strtoupper($countryCode)]);
+        }
+
+        return (int)$stmt->fetchColumn();
     }
 }

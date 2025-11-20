@@ -37,7 +37,9 @@ class SmmOrderRepository extends Repository
     {
         $stmt = $this->pdo->prepare(
             'UPDATE orders_smm
-             SET status = :status, meta = :meta, updated_at = NOW()
+             SET status = :status,
+                 meta = :meta,
+                 updated_at = CURRENT_TIMESTAMP
              WHERE id = :id'
         );
         $stmt->execute([
@@ -54,5 +56,25 @@ class SmmOrderRepository extends Repository
         $order = $stmt->fetch();
 
         return $order ?: null;
+    }
+
+    public function countByService(int $serviceId, ?string $status = null): int
+    {
+        if ($status) {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_smm WHERE service_id = :service AND status = :status'
+            );
+            $stmt->execute([
+                'service' => $serviceId,
+                'status' => $status,
+            ]);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM orders_smm WHERE service_id = :service'
+            );
+            $stmt->execute(['service' => $serviceId]);
+        }
+
+        return (int)$stmt->fetchColumn();
     }
 }

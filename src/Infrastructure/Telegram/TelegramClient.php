@@ -15,7 +15,10 @@ class TelegramClient
 
     public function __construct(array $config)
     {
-        $this->token = $config['token'];
+        $this->token = (string)($config['token'] ?? '');
+        if ($this->token === '') {
+            throw new RuntimeException('Telegram bot token is not configured.');
+        }
         $this->baseUrl = "https://api.telegram.org/bot{$this->token}";
         $this->timeout = (int)($config['timeout'] ?? 15);
         $this->connectTimeout = (int)($config['connect_timeout'] ?? 5);

@@ -29,12 +29,8 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestNumber(string $countryCode): array
     {
-        $query = http_build_query([
-            'apiKey' => $this->apiKey,
-            'action' => 'getNumber',
-            'country' => $countryCode,
-        ]);
-        $url = "{$this->baseUrl}?{$query}";
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=...&country=...
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getNumber&country=" . urlencode($countryCode);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -68,12 +64,8 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestCode(string $hashCode): array
     {
-        $query = http_build_query([
-            'apiKey' => $this->apiKey,
-            'action' => 'getCode',
-            'hash_code' => $hashCode,
-        ]);
-        $url = "{$this->baseUrl}?{$query}";
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=...&hash_code=...
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getCode&hash_code=" . urlencode($hashCode);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -100,5 +92,52 @@ class SpiderNumberProvider implements NumberProviderInterface
             'code' => $result['code'] ?? '',
             'password' => $result['password'] ?? '',
         ];
+    }
+
+    /**
+     * @return array<string, float> Returns array of country codes => base prices
+     */
+    public function getCountries(): array
+    {
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=getCountrys
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getCountrys";
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException("Spider request failed: {$error}");
+        }
+        curl_close($ch);
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded) || ($decoded['error'] ?? '') !== 'INFORMATION_SUCCESS') {
+            $errorMsg = $decoded['msg'] ?? $decoded['error'] ?? 'Unknown error';
+            throw new RuntimeException('Failed to fetch countries from provider: ' . $errorMsg);
+        }
+
+        // API يرجع countries ككائن مع مفاتيح "1" و "2"، نحتاج "1"
+        $countriesData = $decoded['result']['countries'] ?? [];
+        $countries = $countriesData['1'] ?? $countriesData[1] ?? [];
+        
+        if (!is_array($countries) || empty($countries)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($countries as $code => $price) {
+            if (is_numeric($price)) {
+                $result[strtoupper((string)$code)] = (float)$price;
+            }
+        }
+
+        return $result;
     }
 }

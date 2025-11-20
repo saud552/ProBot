@@ -21,17 +21,25 @@ class UserManager
     public function sync(array $payload): array
     {
         $telegramId = (int)$payload['telegram_id'];
-        $languageCode = (string)($payload['language_code'] ?? 'ar');
+        $incomingLanguage = trim((string)($payload['language_code'] ?? ''));
 
         $user = $this->users->findByTelegramId($telegramId);
         if (!$user) {
-            $user = $this->users->create($telegramId, $languageCode);
+            $languageForUser = $incomingLanguage !== '' ? $incomingLanguage : 'ar';
+            $user = $this->users->create($telegramId, $languageForUser);
+        } else {
+            $storedLanguage = (string)($user['language_code'] ?? '');
+            if ($storedLanguage === '') {
+                $languageForUser = $incomingLanguage !== '' ? $incomingLanguage : 'ar';
+                $this->users->updateLanguage((int)$user['id'], $languageForUser);
+                $user['language_code'] = $languageForUser;
+            } else {
+                $user['language_code'] = $storedLanguage;
+            }
         }
 
-        $languageCode = $languageCode !== '' ? $languageCode : ($user['language_code'] ?? 'ar');
-        if ($languageCode !== $user['language_code']) {
-            $this->users->updateLanguage((int)$user['id'], $languageCode);
-            $user['language_code'] = $languageCode;
+        if (!isset($user['language_code']) || $user['language_code'] === '') {
+            $user['language_code'] = 'ar';
         }
 
         $profile = [
@@ -59,6 +67,16 @@ class UserManager
         $this->users->assignReferrerIfEmpty($userId, $referrerId);
     }
 
+    public function updateLanguagePreference(int $userId, string $languageCode): void
+    {
+        $languageCode = trim($languageCode);
+        if ($languageCode === '') {
+            return;
+        }
+
+        $this->users->updateLanguage($userId, $languageCode);
+    }
+
     public function setBanStatus(int $userId, bool $banned): void
     {
         $this->users->setBanStatus($userId, $banned);
@@ -73,5 +91,13 @@ class UserManager
 
         $this->users->setBanStatus((int)$user['id'], $banned);
         return $this->users->findById((int)$user['id']);
+    }
+
+    /**
+     * @return array<int, array{id: int, telegram_id: int}>
+     */
+    public function listAll(): array
+    {
+        return $this->users->listAllTelegramIds();
     }
 }

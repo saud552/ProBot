@@ -18,7 +18,11 @@ use App\Domain\Settings\SettingsService;
 use App\Domain\Support\TicketService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
+use App\Domain\Wallet\TransactionService;
+use App\Infrastructure\Numbers\SpiderNumberProvider;
 use App\Infrastructure\Storage\JsonStore;
+use App\Infrastructure\Repository\NumberOrderRepository;
+use App\Infrastructure\Repository\SmmOrderRepository;
 use App\Infrastructure\Telegram\TelegramClient;
 use App\Presentation\Keyboard\KeyboardFactory;
 use RuntimeException;
@@ -43,6 +47,10 @@ class BotKernel
     private NotificationService $notifications;
     private ReferralService $referralService;
     private SettingsService $settings;
+    private TransactionService $transactions;
+    private NumberOrderRepository $numberOrders;
+    private SmmOrderRepository $smmOrders;
+    private SpiderNumberProvider $numberProvider;
 
     /**
      * @var array<int, string>
@@ -82,7 +90,11 @@ class BotKernel
         TicketService $ticketService,
         NotificationService $notifications,
         ReferralService $referralService,
-        SettingsService $settings
+        SettingsService $settings,
+        TransactionService $transactions,
+        NumberOrderRepository $numberOrders,
+        SmmOrderRepository $smmOrders,
+        SpiderNumberProvider $numberProvider
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -101,6 +113,10 @@ class BotKernel
         $this->notifications = $notifications;
         $this->referralService = $referralService;
         $this->settings = $settings;
+        $this->transactions = $transactions;
+        $this->numberOrders = $numberOrders;
+        $this->smmOrders = $smmOrders;
+        $this->numberProvider = $numberProvider;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
         $this->ticketFlow = $this->store->load('support_flow', []);
@@ -168,6 +184,13 @@ class BotKernel
             return;
         }
 
+        $maintenance = $this->settings->maintenance();
+        if (($maintenance['enabled'] ?? false) && !$this->isAdmin($telegramUserId)) {
+            $messageText = $maintenance['message'] ?? ($strings['maintenance_message'] ?? 'Bot is under maintenance.');
+            $this->sendMessage($chatId, $messageText, []);
+            return;
+        }
+
         if (strpos($text, '/start') === 0) {
             $payload = trim(substr($text, 6));
             if ($payload !== '' && $this->referralService->captureFromPayload($userDbId, $payload)) {
@@ -184,16 +207,18 @@ class BotKernel
             return;
         }
 
-        if (!$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
+        // التحقق من الاشتراك الإجباري (لكن لا نمنع الأدمن)
+        if (!$this->isAdmin($telegramUserId) && !$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
             return;
         }
 
         if ($text === '/start' || str_starts_with($text, '/start ')) {
             $this->clearSmmState($userDbId);
             $this->clearTicketState($userDbId);
+            $startMessage = $this->buildStartMessage($strings, $userRecord, $telegramUser);
             $this->sendMessage(
                 $chatId,
-                $strings['welcome'] ?? 'Welcome',
+                $startMessage,
                 $this->keyboardFactory->mainMenu($strings, $changeLabel, [
                     'features' => $this->features,
                     'is_admin' => $this->isAdmin($telegramUserId),
@@ -269,6 +294,13 @@ class BotKernel
             return;
         }
 
+        $maintenance = $this->settings->maintenance();
+        if (($maintenance['enabled'] ?? false) && !$this->isAdmin($telegramUserId)) {
+            $messageText = $maintenance['message'] ?? ($strings['maintenance_message'] ?? 'Bot is under maintenance.');
+            $this->answerCallback($callbackId, $messageText, true);
+            return;
+        }
+
         if (!$this->enforceSubscription($chatId, $telegramUserId, $strings, $callbackId)) {
             return;
         }
@@ -341,6 +373,20 @@ class BotKernel
             return;
         }
 
+        if (($parts[0] ?? '') === 'lang') {
+            $this->handleLanguageCallback(
+                $chatId,
+                $messageId,
+                $callbackId,
+                $userDbId,
+                $telegramUserId,
+                $parts,
+                $strings,
+                $backLabel
+            );
+            return;
+        }
+
         switch ($data) {
             case 'inviteLink':
                 $this->handleReferralCallback(
@@ -352,6 +398,21 @@ class BotKernel
                     $strings,
                     $backLabel
                 );
+                break;
+            case 'requestPoint':
+                $this->showRechargeInfo($chatId, $messageId, $userDbId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
+            case 'agents':
+                $this->showPublicAgents($chatId, $messageId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
+            case 'activations':
+                $this->showActivationsInfo($chatId, $messageId, $userDbId, $strings, $backLabel);
+                $this->answerCallback($callbackId, '✅');
+                break;
+            case 'changeLanguage':
+                $this->showLanguageMenu($chatId, $messageId, $strings, $backLabel);
                 break;
             case 'back':
                 $this->editMessage(
@@ -532,28 +593,27 @@ class BotKernel
      */
     private function numbersListPayload(array $strings, string $backLabel, int $page): array
     {
-        $perPage = 6;
+        $perPage = 20; // 20 دولة لكل صفحة (10 صفوف، كل صف دولتين)
         $languageCode = $strings['_lang'] ?? null;
         $pagination = $this->numberCatalog->paginate($page, $perPage, $languageCode);
         $items = $pagination['items'];
 
-        $text = $this->numbersMenuText($strings, $strings['numbers_usd_button'] ?? 'Buy with USD');
+        // بناء النص الترحيبي
+        $text = ($strings['numbers_welcome_title'] ?? '🏆 - أهلاً بك عزيزي في قسم حسابات تيليجرام الجاهزة 💥.') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_welcome_description'] ?? 'من خلال هذا القسم يمكنك شراء حسابات تيليجرام جاهز من أي دولة موجودة في الأسفل وبالسعر الموضح بجانبها بكل سهولة، بأسعار مغرية وضمان تفعيل الرقم ☑️ .') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_welcome_instruction'] ?? '♻️ - يرجى إختيار الدولة التي تريد شراء حساب منها ، جميع الدول بالأسفل متوفر لديها أرقام ☑️ .');
+
         if ($items === []) {
             $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
-        } else {
-            $lines = array_map(
-                fn (array $country): string => $this->formatCountryLine($country),
-                $items
-            );
-            $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
         }
 
+        // بناء لوحة المفاتيح: 20 دولة (كل دولتين في سطر)
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
-            $name = $this->countryDisplayName($country);
+            $name = $this->countryDisplayName($country, $languageCode);
             $row[] = [
-                'text' => sprintf('%s • $%0.2f', $name, $country['price_usd']),
+                'text' => sprintf('%s %0.2f$', $name, $country['price_usd']),
                 'callback_data' => sprintf('numbers:country:%s:%d', $country['code'], $page),
             ];
             if (count($row) === 2) {
@@ -561,21 +621,23 @@ class BotKernel
                 $row = [];
             }
         }
+        // إضافة الصف الأخير إذا كان يحتوي على دولة واحدة فقط
         if ($row !== []) {
             $keyboard[] = $row;
         }
 
+        // أزرار التنقل (التالي/السابق)
         if ($page > 0 || $pagination['has_next']) {
             $nav = [];
             if ($page > 0) {
                 $nav[] = [
-                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'text' => $strings['button_previous'] ?? 'السابق',
                     'callback_data' => sprintf('numbers:list:%d', max(0, $page - 1)),
                 ];
             }
             if ($pagination['has_next']) {
                 $nav[] = [
-                    'text' => $strings['button_next'] ?? 'Next',
+                    'text' => $strings['button_next'] ?? 'التالي',
                     'callback_data' => sprintf('numbers:list:%d', $page + 1),
                 ];
             }
@@ -584,11 +646,9 @@ class BotKernel
             }
         }
 
+        // زر الرجوع للقائمة الرئيسية
         $keyboard[] = [
-            ['text' => $strings['main_numbers_button'] ?? 'Numbers', 'callback_data' => 'numbers:root'],
-        ];
-        $keyboard[] = [
-            ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+            ['text' => $strings['main_menu'] ?? 'القائمة الرئيسية', 'callback_data' => 'back'],
         ];
 
         return [
@@ -627,34 +687,28 @@ class BotKernel
 
     private function numbersStarListPayload(array $strings, string $backLabel, int $page): array
     {
-        $perPage = 6;
+        $perPage = 20; // 20 دولة لكل صفحة (10 صفوف، كل صف دولتين)
         $languageCode = $strings['_lang'] ?? null;
         $pagination = $this->numberCatalog->paginate($page, $perPage, $languageCode);
         $items = $pagination['items'];
 
-        $title = $strings['menu_purchase_stars'] ?? 'Buy Accounts (Stars)';
-        $text = $title;
+        // بناء النص الترحيبي
+        $text = ($strings['numbers_stars_welcome_title'] ?? '🏆 - أهلاً بك عزيزي في قسم شراء حسابات تيليجرام بالنجوم 💥.') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_stars_welcome_description'] ?? 'من خلال هذا القسم يمكنك شراء حسابات تيليجرام جاهز من أي دولة موجودة في الأسفل وبالسعر الموضح بجانبها (بالدولار والنجوم) بكل سهولة، بأسعار مغرية وضمان تفعيل الرقم ☑️ .') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_stars_welcome_instruction'] ?? '♻️ - يرجى إختيار الدولة التي تريد شراء حساب منها ، جميع الدول بالأسفل متوفر لديها أرقام ☑️ .');
+
         if ($items === []) {
             $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
-        } else {
-            $lines = array_map(
-                fn (array $country): string => $this->formatStarCountryLine($country),
-                $items
-            );
-            $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
         }
 
+        // بناء لوحة المفاتيح: 20 دولة (كل دولتين في سطر)
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
-            $name = $this->countryDisplayName($country);
+            $name = $this->countryDisplayName($country, $languageCode);
+            $stars = $this->convertUsdToStars((float)$country['price_usd']);
             $row[] = [
-                'text' => sprintf(
-                    '%s • $%0.2f ≈ %d⭐️',
-                    $name,
-                    $country['price_usd'],
-                    $this->convertUsdToStars((float)$country['price_usd'])
-                ),
+                'text' => sprintf('%s %d⭐️', $name, $stars),
                 'callback_data' => sprintf('numbers:starscountry:%s:%d', $country['code'], $page),
             ];
             if (count($row) === 2) {
@@ -662,21 +716,23 @@ class BotKernel
                 $row = [];
             }
         }
+        // إضافة الصف الأخير إذا كان يحتوي على دولة واحدة فقط
         if ($row !== []) {
             $keyboard[] = $row;
         }
 
+        // أزرار التنقل (التالي/السابق)
         if ($page > 0 || $pagination['has_next']) {
             $nav = [];
             if ($page > 0) {
                 $nav[] = [
-                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'text' => $strings['button_previous'] ?? 'السابق',
                     'callback_data' => sprintf('numbers:starslist:%d', max(0, $page - 1)),
                 ];
             }
             if ($pagination['has_next']) {
                 $nav[] = [
-                    'text' => $strings['button_next'] ?? 'Next',
+                    'text' => $strings['button_next'] ?? 'التالي',
                     'callback_data' => sprintf('numbers:starslist:%d', $page + 1),
                 ];
             }
@@ -685,11 +741,9 @@ class BotKernel
             }
         }
 
+        // زر الرجوع للقائمة الرئيسية
         $keyboard[] = [
-            ['text' => $strings['main_numbers_button'] ?? 'Numbers', 'callback_data' => 'numbers:root'],
-        ];
-        $keyboard[] = [
-            ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+            ['text' => $strings['main_menu'] ?? 'القائمة الرئيسية', 'callback_data' => 'back'],
         ];
 
         return [
@@ -887,35 +941,58 @@ class BotKernel
         return $title . PHP_EOL . $priceLine . PHP_EOL . PHP_EOL . $disclaimer;
     }
 
-    private function formatCountryLine(array $country): string
+    private function formatCountryLine(array $country, ?string $languageCode = null): string
     {
         return sprintf(
-            '%s (%s) • $%0.2f',
-            $this->esc($this->countryDisplayName($country)),
-            $this->esc($country['code']),
+            '%s • $%0.2f',
+            $this->esc($this->countryDisplayName($country, $languageCode)),
             $country['price_usd']
         );
     }
 
-    private function formatStarCountryLine(array $country): string
+    private function formatStarCountryLine(array $country, ?string $languageCode = null): string
     {
         return sprintf(
-            '%s (%s) • $%0.2f ≈ %d⭐️',
-            $this->esc($this->countryDisplayName($country)),
-            $this->esc($country['code']),
+            '%s • $%0.2f ≈ %d⭐️',
+            $this->esc($this->countryDisplayName($country, $languageCode)),
             $country['price_usd'],
             $this->convertUsdToStars((float)$country['price_usd'])
         );
     }
 
-    private function countryDisplayName(array $country): string
+    private function countryDisplayName(array $country, ?string $languageCode = null): string
     {
         $display = (string)($country['display_name'] ?? '');
-        if ($display !== '') {
+        if ($display !== '' && $display !== ($country['code'] ?? '')) {
             return $display;
         }
 
-        return (string)($country['name'] ?? '');
+        // إذا لم يكن هناك display_name أو كان نفس الكود، جرب استخدام الترجمات من الملف
+        $code = strtoupper((string)($country['code'] ?? ''));
+        
+        if ($code !== '') {
+            static $countryNames = null;
+            if ($countryNames === null) {
+                $countryNames = require APP_BASE_PATH . '/lang/country_names.php';
+            }
+            
+            // استخدام اللغة الحالية للمستخدم
+            if ($languageCode && isset($countryNames[$languageCode][$code])) {
+                return $countryNames[$languageCode][$code];
+            }
+            
+            // جرب العربية كبديل
+            if (isset($countryNames['ar'][$code])) {
+                return $countryNames['ar'][$code];
+            }
+            
+            // جرب الإنجليزية كبديل
+            if (isset($countryNames['en'][$code])) {
+                return $countryNames['en'][$code];
+            }
+        }
+
+        return (string)($country['name'] ?? $code);
     }
 
     private function convertUsdToStars(float $price): int
@@ -1319,6 +1396,324 @@ class BotKernel
                     $strings
                 );
                 return;
+            case 'wallet':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'credit') {
+                    $this->setAdminState($userDbId, ['state' => 'await_wallet_user', 'mode' => 'credit']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_prompt_wallet_user'] ?? 'Send the Telegram ID for the user.', []);
+                    return;
+                }
+                if ($action === 'debit') {
+                    $this->setAdminState($userDbId, ['state' => 'await_wallet_user', 'mode' => 'debit']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_prompt_wallet_user'] ?? 'Send the Telegram ID for the user.', []);
+                    return;
+                }
+                if ($action === 'refund') {
+                    $this->setAdminState($userDbId, ['state' => 'await_wallet_refund_reference']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_reference_prompt'] ?? 'Send the order reference as numbers:123 or smm:45.', []);
+                    return;
+                }
+                $this->showAdminWalletPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'catalog':
+                $section = $parts[2] ?? 'panel';
+                if ($section === 'numbers') {
+                    $action = $parts[3] ?? 'list';
+                    if ($action === 'list') {
+                        $page = (int)($parts[4] ?? 0);
+                        $this->sendNumberCatalogOverview($chatId, $messageId, $page, $strings);
+                        $this->answerCallback($callbackId, '✅');
+                        return;
+                    }
+                    if ($action === 'add') {
+                        $this->setAdminState($userDbId, ['state' => 'await_country_payload']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage(
+                            $chatId,
+                            $strings['admin_catalog_country_prompt'] ?? 'Send data as CODE|Name|PriceUSD|ProviderID|Margin% (translations optional JSON).',
+                            []
+                        );
+                        return;
+                    }
+                    if ($action === 'remove') {
+                        $this->setAdminState($userDbId, ['state' => 'await_country_delete']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send the country code to remove.', []);
+                        return;
+                    }
+                    if ($action === 'import') {
+                        $this->setAdminState($userDbId, ['state' => 'await_country_import']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage(
+                            $chatId,
+                            $strings['admin_catalog_import_prompt'] ?? 'Send lines in the format CODE PRICE per line.',
+                            []
+                        );
+                        return;
+                    }
+                    if ($action === 'auto_import') {
+                        $this->answerCallback($callbackId, '⏳');
+                        try {
+                            $countries = $this->numberProvider->getCountries();
+                            if (empty($countries)) {
+                                $this->sendMessage(
+                                    $chatId,
+                                    $strings['admin_catalog_auto_import_error'] ?? 'Failed to fetch countries from provider.',
+                                    []
+                                );
+                                return;
+                            }
+                            // تحميل ترجمات أسماء الدول
+                            $countryNames = require APP_BASE_PATH . '/lang/country_names.php';
+                            $general = $this->settings->general();
+                            $margin = (float)($general['pricing_margin_percent'] ?? 0);
+                            $applied = 0;
+                            $existingCountries = [];
+                            foreach ($this->numberCatalog->allRaw() as $existing) {
+                                $existingCountries[strtoupper($existing['code'])] = $existing;
+                            }
+                            foreach ($countries as $code => $basePrice) {
+                                $basePrice = round((float)$basePrice, 2);
+                                $existing = $existingCountries[$code] ?? null;
+                                
+                                // إعداد الترجمات من ملف country_names.php
+                                $translations = [];
+                                foreach ($countryNames as $lang => $names) {
+                                    if (isset($names[$code])) {
+                                        $translations[$lang] = $names[$code];
+                                    }
+                                }
+                                
+                                // تحديد الاسم الافتراضي (العربي أو الإنجليزي)
+                                $defaultName = $translations['ar'] ?? $translations['en'] ?? $code;
+                                
+                                if ($existing) {
+                                    // دمج الترجمات الموجودة مع الجديدة
+                                    $existingTranslations = [];
+                                    if (isset($existing['name_translations'])) {
+                                        if (is_string($existing['name_translations'])) {
+                                            $decoded = json_decode($existing['name_translations'], true);
+                                            $existingTranslations = is_array($decoded) ? $decoded : [];
+                                        } elseif (is_array($existing['name_translations'])) {
+                                            $existingTranslations = $existing['name_translations'];
+                                        }
+                                    }
+                                    $mergedTranslations = array_merge($translations, $existingTranslations);
+                                    $payload = [
+                                        'code' => $code,
+                                        'name' => $existing['name'] ?: $defaultName,
+                                        'name_translations' => $mergedTranslations,
+                                        'price_usd' => $basePrice,
+                                        'margin_percent' => $margin,
+                                        'provider_id' => $existing['provider_id'] ?? 1,
+                                        'is_active' => $existing['is_active'] ?? 1,
+                                    ];
+                                } else {
+                                    $payload = [
+                                        'code' => $code,
+                                        'name' => $defaultName,
+                                        'name_translations' => $translations,
+                                        'price_usd' => $basePrice,
+                                        'margin_percent' => $margin,
+                                        'provider_id' => 1,
+                                        'is_active' => 1,
+                                    ];
+                                }
+                                $this->numberCatalog->upsert($payload);
+                                $applied++;
+                            }
+                            $this->sendMessage(
+                                $chatId,
+                                sprintf(
+                                    $strings['admin_catalog_auto_import_done'] ?? 'Successfully imported %d countries with %0.2f%% margin applied.',
+                                    $applied,
+                                    $margin
+                                ),
+                                []
+                            );
+                        } catch (Throwable $e) {
+                            $errorMsg = $e->getMessage();
+                            // تسجيل الخطأ في السجلات
+                            error_log("Auto import error: " . $errorMsg . "\n" . $e->getTraceAsString());
+                            $this->sendMessage(
+                                $chatId,
+                                ($strings['admin_catalog_auto_import_error'] ?? 'Failed to import countries') . ': ' . $errorMsg,
+                                []
+                            );
+                        }
+                        return;
+                    }
+                    if ($action === 'margin') {
+                        $this->setAdminState($userDbId, ['state' => 'await_catalog_margin']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage(
+                            $chatId,
+                            $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 15 أو 12.5).',
+                            []
+                        );
+                        return;
+                    }
+                }
+                $this->showAdminCatalogPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'pricing':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'margin') {
+                    $this->setAdminState($userDbId, ['state' => 'await_pricing_margin']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_pricing_margin_prompt'] ?? 'Send the global margin percentage (e.g. 15 or 12.5).',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'custom') {
+                    $this->setAdminState($userDbId, ['state' => 'await_pricing_custom']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_pricing_custom_prompt'] ?? 'Send the country code and price as: US 1.75',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'fee') {
+                    $this->setAdminState($userDbId, ['state' => 'await_transfer_fee']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_transfer_fee_prompt'] ?? 'Send the transfer fee percent (e.g. 2.5).',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'min') {
+                    $this->setAdminState($userDbId, ['state' => 'await_transfer_min']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_transfer_min_prompt'] ?? 'Send the minimum transfer amount.',
+                        []
+                    );
+                    return;
+                }
+                $this->showAdminPricingPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'content':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'start') {
+                    $this->setAdminState($userDbId, ['state' => 'await_general_start']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_content_start_prompt'] ?? 'Send the new start message.', []);
+                    return;
+                }
+                if ($action === 'help') {
+                    $this->setAdminState($userDbId, ['state' => 'await_general_help']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_content_help_prompt'] ?? 'Send the help/guide text.', []);
+                    return;
+                }
+                $this->showAdminContentPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'agents':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'add') {
+                    $this->setAdminState($userDbId, ['state' => 'await_agent_add']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_agents_add_prompt'] ?? 'Send as Name|username (username optional).', []);
+                    return;
+                }
+                if ($action === 'remove') {
+                    $this->setAdminState($userDbId, ['state' => 'await_agent_remove']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_agents_remove_prompt'] ?? 'Send the agent username or name to remove.', []);
+                    return;
+                }
+                $this->showAdminAgentsPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'maintenance':
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'toggle') {
+                    $config = $this->settings->maintenance();
+                    $config['enabled'] = !($config['enabled'] ?? false);
+                    $this->settings->updateMaintenance($config);
+                    $this->logAdminAction(sprintf('Maintenance %s', $config['enabled'] ? 'enabled' : 'disabled'));
+                    $this->showAdminMaintenancePanel($chatId, $messageId, $strings);
+                    $this->answerCallback($callbackId, '✅');
+                    return;
+                }
+                if ($action === 'message') {
+                    $this->setAdminState($userDbId, ['state' => 'await_maintenance_message']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_maintenance_message_prompt'] ?? 'Send the maintenance message.', []);
+                    return;
+                }
+                $this->showAdminMaintenancePanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'broadcast':
+                $this->promptBroadcast($chatId, $messageId, $callbackId, $userDbId, $strings);
+                return;
+            case 'stats':
+                $this->showAdminStats($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
+            case 'smm':
+                $action = $parts[2] ?? 'categories';
+                if ($action === 'categories') {
+                    $this->showAdminSmmCategories($chatId, $messageId, $strings);
+                    $this->answerCallback($callbackId, '✅');
+                    return;
+                }
+                if ($action === 'categories_add') {
+                    $this->setAdminState($userDbId, ['state' => 'await_smm_category_add']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_smm_category_prompt'] ?? 'Send as CODE|Name|Caption|SortOrder.',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'categories_remove') {
+                    $this->setAdminState($userDbId, ['state' => 'await_smm_category_remove']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_smm_category_remove_prompt'] ?? 'Send the category code to remove.', []);
+                    return;
+                }
+                if ($action === 'services') {
+                    $this->showAdminSmmServices($chatId, $messageId, $strings);
+                    $this->answerCallback($callbackId, '✅');
+                    return;
+                }
+                if ($action === 'services_add') {
+                    $this->setAdminState($userDbId, ['state' => 'await_smm_service_add']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_smm_service_prompt'] ?? 'Send as CATEGORY_CODE|ProviderCode|Name|Rate|Min|Max|Currency.',
+                        []
+                    );
+                    return;
+                }
+                if ($action === 'services_remove') {
+                    $this->setAdminState($userDbId, ['state' => 'await_smm_service_remove']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_smm_service_remove_prompt'] ?? 'Send the service ID to remove.', []);
+                    return;
+                }
+                $this->showAdminCatalogPanel($chatId, $messageId, $strings);
+                $this->answerCallback($callbackId, '✅');
+                return;
             case 'features':
                 if (($parts[2] ?? '') === 'toggle') {
                     $this->toggleFeatureFlag($parts[3] ?? '', $strings);
@@ -1379,10 +1774,21 @@ class BotKernel
                 $this->answerCallback($callbackId, '✅');
                 return;
             case 'referrals':
-                if (($parts[2] ?? '') === 'toggle') {
+                $action = $parts[2] ?? 'panel';
+                if ($action === 'toggle') {
                     $this->toggleReferralsEnabled($strings);
                     $this->answerCallback($callbackId, '✅');
                     $this->showAdminReferralsPanel($chatId, $messageId, $strings);
+                    return;
+                }
+                if ($action === 'config') {
+                    $this->setAdminState($userDbId, ['state' => 'await_referral_config']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage(
+                        $chatId,
+                        $strings['admin_referrals_config_prompt'] ?? 'Send flat reward, percent, min order (e.g. 1.5|5|2).',
+                        []
+                    );
                     return;
                 }
                 $this->showAdminReferralsPanel($chatId, $messageId, $strings);
@@ -1390,14 +1796,16 @@ class BotKernel
                 return;
             case 'users':
                 $action = $parts[2] ?? 'panel';
-                if (in_array($action, ['ban', 'unban'], true)) {
-                    $userId = (int)($parts[3] ?? 0);
-                    if ($userId > 0) {
-                        $this->userManager->setBanStatus($userId, $action === 'ban');
-                        $statusLabel = $action === 'ban' ? 'banned' : 'unbanned';
-                        $this->logAdminAction(sprintf('User #%d %s', $userId, $statusLabel));
-                    }
-                    $this->answerCallback($callbackId, '✅');
+                if ($action === 'ban') {
+                    $this->setAdminState($userDbId, ['state' => 'await_user_ban']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+                    return;
+                }
+                if ($action === 'unban') {
+                    $this->setAdminState($userDbId, ['state' => 'await_user_unban']);
+                    $this->answerCallback($callbackId, '✍️');
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
                     return;
                 }
                 $this->showAdminUsersPanel($chatId, $messageId, $strings);
@@ -1410,46 +1818,48 @@ class BotKernel
         }
     }
 
-    private function showAdminMenu(int $chatId, int $messageId, array $strings): void
+    private function showAdminMenu(int $chatId, ?int $messageId, array $strings): void
     {
         $text = $strings['admin_panel_title'] ?? 'Admin Panel';
         $keyboard = [
             [
-                [
-                    'text' => $strings['admin_section_tickets'] ?? 'Tickets',
-                    'callback_data' => 'admin:tickets:list',
-                ],
-                [
-                    'text' => $strings['admin_section_users'] ?? 'Users',
-                    'callback_data' => 'admin:users',
-                ],
+                ['text' => $strings['admin_section_tickets'] ?? 'Tickets', 'callback_data' => 'admin:tickets:list'],
+                ['text' => $strings['admin_section_users'] ?? 'Users', 'callback_data' => 'admin:users'],
             ],
             [
-                [
-                    'text' => $strings['admin_section_features'] ?? 'Features',
-                    'callback_data' => 'admin:features',
-                ],
-                [
-                    'text' => $strings['admin_section_stars'] ?? 'Stars',
-                    'callback_data' => 'admin:stars',
-                ],
+                ['text' => $strings['admin_section_wallet'] ?? 'Wallet', 'callback_data' => 'admin:wallet'],
+                ['text' => $strings['admin_section_catalog'] ?? 'Catalog', 'callback_data' => 'admin:catalog'],
             ],
             [
-                [
-                    'text' => $strings['admin_section_forcesub'] ?? 'Forced Subscription',
-                    'callback_data' => 'admin:forcesub',
-                ],
-                [
-                    'text' => $strings['admin_section_referrals'] ?? 'Referrals',
-                    'callback_data' => 'admin:referrals',
-                ],
+                ['text' => $strings['admin_section_pricing'] ?? 'Pricing', 'callback_data' => 'admin:pricing'],
+                ['text' => $strings['admin_section_stars'] ?? 'Stars', 'callback_data' => 'admin:stars'],
+            ],
+            [
+                ['text' => $strings['admin_section_content'] ?? 'Content', 'callback_data' => 'admin:content'],
+                ['text' => $strings['admin_section_broadcast'] ?? 'Broadcast', 'callback_data' => 'admin:broadcast'],
+            ],
+            [
+                ['text' => $strings['admin_section_forcesub'] ?? 'Forced Subscription', 'callback_data' => 'admin:forcesub'],
+                ['text' => $strings['admin_section_maintenance'] ?? 'Maintenance', 'callback_data' => 'admin:maintenance'],
+            ],
+            [
+                ['text' => $strings['admin_section_agents'] ?? 'Agents', 'callback_data' => 'admin:agents'],
+                ['text' => $strings['admin_section_referrals'] ?? 'Referrals', 'callback_data' => 'admin:referrals'],
+            ],
+            [
+                ['text' => $strings['admin_section_features'] ?? 'Features', 'callback_data' => 'admin:features'],
+                ['text' => $strings['admin_section_stats'] ?? 'Stats', 'callback_data' => 'admin:stats'],
             ],
             [
                 ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'back'],
             ],
         ];
 
-        $this->editMessage($chatId, $messageId, $text, $keyboard);
+        if ($messageId !== null) {
+            $this->editMessage($chatId, $messageId, $text, $keyboard);
+        } else {
+            $this->sendMessage($chatId, $text, $keyboard);
+        }
     }
 
     private function showAdminFeaturesPanel(int $chatId, int $messageId, array $strings): void
@@ -1549,6 +1959,630 @@ class BotKernel
         $this->editMessage($chatId, $messageId, $text, $keyboard);
     }
 
+    private function showAdminWalletPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $text = $strings['admin_wallet_title'] ?? 'Wallet & Users';
+        $keyboard = [
+            [
+                ['text' => $strings['admin_wallet_credit'] ?? 'Credit Balance', 'callback_data' => 'admin:wallet:credit'],
+                ['text' => $strings['admin_wallet_debit'] ?? 'Debit Balance', 'callback_data' => 'admin:wallet:debit'],
+            ],
+            [
+                ['text' => $strings['admin_wallet_refund'] ?? 'Refund User', 'callback_data' => 'admin:wallet:refund'],
+                ['text' => $strings['admin_user_ban_button'] ?? 'Ban user', 'callback_data' => 'admin:users:ban'],
+            ],
+            [
+                ['text' => $strings['admin_user_unban_button'] ?? 'Unban user', 'callback_data' => 'admin:users:unban'],
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminCatalogPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $general = $this->settings->general();
+        $margin = (float)($general['pricing_margin_percent'] ?? 0);
+        $text = $strings['admin_catalog_title'] ?? 'Catalog Management';
+        $text .= PHP_EOL . PHP_EOL;
+        $text .= sprintf(
+            "%s: %0.2f%%",
+            $strings['admin_pricing_margin_label'] ?? 'هامش الربح العام',
+            $margin
+        );
+        $keyboard = [
+            [
+                ['text' => $strings['admin_catalog_numbers_list'] ?? 'List Countries', 'callback_data' => 'admin:catalog:numbers:list:0'],
+                ['text' => $strings['admin_catalog_numbers_add'] ?? 'Add Country', 'callback_data' => 'admin:catalog:numbers:add'],
+            ],
+            [
+                ['text' => $strings['admin_catalog_numbers_remove'] ?? 'Remove Country', 'callback_data' => 'admin:catalog:numbers:remove'],
+                ['text' => $strings['admin_catalog_numbers_import'] ?? 'Import Countries', 'callback_data' => 'admin:catalog:numbers:import'],
+            ],
+            [
+                ['text' => $strings['admin_catalog_numbers_auto_import'] ?? 'Auto Import Countries', 'callback_data' => 'admin:catalog:numbers:auto_import'],
+            ],
+            [
+                ['text' => $strings['admin_catalog_set_margin'] ?? 'تحديد نسبة الربح', 'callback_data' => 'admin:catalog:margin'],
+            ],
+            [
+                ['text' => $strings['admin_smm_categories'] ?? 'SMM Categories', 'callback_data' => 'admin:smm:categories'],
+                ['text' => $strings['admin_smm_services'] ?? 'SMM Services', 'callback_data' => 'admin:smm:services'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminPricingPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $general = $this->settings->general();
+        $stars = $this->settings->stars();
+        $margin = (float)($general['pricing_margin_percent'] ?? 0);
+        $transferFee = (float)($general['transfer_fee_percent'] ?? 0);
+        $transferMinimum = (float)($general['transfer_minimum'] ?? 0);
+        $starPrice = $stars['usd_per_star'] ?? 0.011;
+        $text = ($strings['admin_pricing_title'] ?? 'Pricing Settings') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %0.2f%%%s%s: %0.2f%%%s%s: %0.2f%s%s: %0.4f",
+            $strings['admin_pricing_margin_label'] ?? 'Global margin',
+            $margin,
+            PHP_EOL,
+            $strings['admin_transfer_fee_label'] ?? 'Transfer fee',
+            $transferFee,
+            PHP_EOL,
+            $strings['admin_transfer_min_label'] ?? 'Minimum transfer',
+            $transferMinimum,
+            PHP_EOL,
+            $strings['admin_stars_price_label'] ?? 'USD per Star',
+            $starPrice
+        );
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_pricing_set_margin'] ?? 'Set Margin', 'callback_data' => 'admin:pricing:margin'],
+                ['text' => $strings['admin_pricing_set_custom'] ?? 'Custom Country Price', 'callback_data' => 'admin:pricing:custom'],
+            ],
+            [
+                ['text' => $strings['admin_transfer_fee_button'] ?? 'Transfer fee', 'callback_data' => 'admin:pricing:fee'],
+                ['text' => $strings['admin_transfer_min_button'] ?? 'Transfer min', 'callback_data' => 'admin:pricing:min'],
+            ],
+            [
+                ['text' => $strings['admin_stars_set_price_button'] ?? 'Set Star Price', 'callback_data' => 'admin:stars:setprice'],
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminContentPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $general = $this->settings->general();
+        $text = ($strings['admin_content_title'] ?? 'Content Settings') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %s%s%s: %s",
+            $strings['admin_content_start_label'] ?? 'Start message',
+            $general['start_message'] ? $this->esc($general['start_message']) : ($strings['none'] ?? '-'),
+            PHP_EOL,
+            $strings['admin_content_help_label'] ?? 'Help text',
+            $general['help_text'] ? $this->esc($general['help_text']) : ($strings['none'] ?? '-')
+        );
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_content_set_start'] ?? 'Update Start', 'callback_data' => 'admin:content:start'],
+                ['text' => $strings['admin_content_set_help'] ?? 'Update Help', 'callback_data' => 'admin:content:help'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminAgentsPanel(int $chatId, int $messageId, array $strings): void
+    {
+        $agents = $this->settings->agents();
+        $lines = [];
+        foreach ($agents as $index => $agent) {
+            $label = sprintf('%d. %s', $index + 1, $agent['name']);
+            if ($agent['username']) {
+                $label .= ' (@' . ltrim($agent['username'], '@') . ')';
+            }
+            $lines[] = $label;
+        }
+        $text = ($strings['admin_agents_title'] ?? 'Agents') . PHP_EOL;
+        $text .= $lines ? implode(PHP_EOL, $lines) : ($strings['admin_agents_empty'] ?? 'No agents configured.');
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_agents_add_button'] ?? 'Add Agent', 'callback_data' => 'admin:agents:add'],
+                ['text' => $strings['admin_agents_remove_button'] ?? 'Remove Agent', 'callback_data' => 'admin:agents:remove'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminMaintenancePanel(int $chatId, int $messageId, array $strings): void
+    {
+        $maintenance = $this->settings->maintenance();
+        $text = ($strings['admin_maintenance_title'] ?? 'Maintenance Mode') . PHP_EOL;
+        $text .= sprintf(
+            "%s: %s\n%s",
+            $strings['admin_stars_enabled_label'] ?? 'Enabled',
+            ($maintenance['enabled'] ?? false) ? 'ON' : 'OFF',
+            $maintenance['message'] ?? ($strings['admin_maintenance_default'] ?? 'Bot is under maintenance.')
+        );
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_maintenance_toggle'] ?? 'Toggle', 'callback_data' => 'admin:maintenance:toggle'],
+                ['text' => $strings['admin_maintenance_set_message'] ?? 'Set Message', 'callback_data' => 'admin:maintenance:message'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function promptBroadcast(int $chatId, int $messageId, ?string $callbackId, int $userId, array $strings): void
+    {
+        $this->setAdminState($userId, ['state' => 'await_broadcast_message']);
+        $this->answerCallback($callbackId, '✍️');
+        $this->editMessage(
+            $chatId,
+            $messageId,
+            $strings['admin_broadcast_prompt'] ?? 'Send the message you want to broadcast to all users.',
+            [
+                [
+                    ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+                ],
+            ]
+        );
+    }
+
+    private function showAdminStats(int $chatId, int $messageId, array $strings): void
+    {
+        $users = $this->userManager->listAll();
+        $totalUsers = count($users);
+        $agents = $this->settings->agents();
+        $referrals = $this->settings->referrals();
+        $stats = sprintf(
+            "%s: %d\n%s: %d\n%s: %s",
+            $strings['admin_stats_users'] ?? 'Users',
+            $totalUsers,
+            $strings['admin_stats_agents'] ?? 'Agents',
+            count($agents),
+            $strings['admin_stats_referrals'] ?? 'Referrals enabled',
+            ($referrals['enabled'] ?? false) ? 'YES' : 'NO'
+        );
+
+        $this->editMessage($chatId, $messageId, $stats, [
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ]);
+    }
+
+    private function showAdminSmmCategories(int $chatId, int $messageId, array $strings): void
+    {
+        $categories = $this->smmCatalog->allCategories();
+        $lines = [];
+        foreach ($categories as $category) {
+            $status = ((int)($category['is_active'] ?? 1)) === 1 ? '✅' : '⛔';
+            $lines[] = sprintf('%s • %s', $category['code'], $status);
+        }
+        $text = ($strings['admin_smm_categories_title'] ?? 'SMM Categories') . PHP_EOL;
+        $text .= $lines ? implode(PHP_EOL, $lines) : ($strings['admin_smm_empty'] ?? 'No entries yet.');
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_smm_add_category'] ?? 'Add Category', 'callback_data' => 'admin:smm:categories_add'],
+                ['text' => $strings['admin_smm_remove_category'] ?? 'Remove Category', 'callback_data' => 'admin:smm:categories_remove'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:catalog'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminSmmServices(int $chatId, int $messageId, array $strings): void
+    {
+        $services = array_slice($this->smmCatalog->allServices(), 0, 12);
+        $lines = [];
+        foreach ($services as $service) {
+            $status = ((int)($service['is_active'] ?? 1)) === 1 ? '✅' : '⛔';
+            $lines[] = sprintf('#%d • %s (%s)', $service['id'], $service['name'], $status);
+        }
+        $text = ($strings['admin_smm_services_title'] ?? 'SMM Services') . PHP_EOL;
+        $text .= $lines ? implode(PHP_EOL, $lines) : ($strings['admin_smm_empty'] ?? 'No entries yet.');
+
+        $keyboard = [
+            [
+                ['text' => $strings['admin_smm_add_service'] ?? 'Add Service', 'callback_data' => 'admin:smm:services_add'],
+                ['text' => $strings['admin_smm_remove_service'] ?? 'Remove Service', 'callback_data' => 'admin:smm:services_remove'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:catalog'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function sendNumberCatalogOverview(int $chatId, int $messageId, int $page, array $strings): void
+    {
+        $records = $this->numberCatalog->allRaw();
+        $perPage = 10;
+        $total = count($records);
+        $page = max(0, $page);
+        $offset = $page * $perPage;
+        $slice = array_slice($records, $offset, $perPage);
+
+        $lines = [];
+        foreach ($slice as $record) {
+            $status = ((int)($record['is_active'] ?? 1)) === 1 ? '✅' : '⛔';
+            $lines[] = sprintf('%s • %s • $%0.2f %s', $record['code'], $record['name'], $record['price_usd'], $status);
+        }
+
+        $text = ($strings['admin_catalog_numbers_title'] ?? 'Numbers Countries') . PHP_EOL;
+        $text .= $lines ? implode(PHP_EOL, $lines) : ($strings['admin_catalog_empty'] ?? 'No countries configured.');
+
+        $keyboard = [];
+        if ($offset > 0 || $offset + $perPage < $total) {
+            $nav = [];
+            if ($offset > 0) {
+                $nav[] = [
+                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'callback_data' => sprintf('admin:catalog:numbers:list:%d', max(0, $page - 1)),
+                ];
+            }
+            if ($offset + $perPage < $total) {
+                $nav[] = [
+                    'text' => $strings['button_next'] ?? 'Next',
+                    'callback_data' => sprintf('admin:catalog:numbers:list:%d', $page + 1),
+                ];
+            }
+            if ($nav !== []) {
+                $keyboard[] = $nav;
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:catalog'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, mixed> $state
+     * @param array<string, string> $strings
+     */
+    private function completeWalletAdjustment(
+        int $chatId,
+        int $adminUserId,
+        int $adminTelegramId,
+        array $state,
+        float $amount,
+        string $mode,
+        array $strings,
+        array $options = []
+    ): void {
+        $targetUserId = $state['target_user_id'] ?? null;
+        $targetTelegramId = $state['target_telegram_id'] ?? null;
+
+        if (!$targetUserId || !$targetTelegramId) {
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            $this->clearAdminState($adminUserId);
+            return;
+        }
+
+        $currency = $options['currency'] ?? 'USD';
+        try {
+            if ($mode === 'debit') {
+                $this->wallets->debit((int)$targetUserId, $amount, $currency);
+            } else {
+                $this->wallets->credit((int)$targetUserId, $amount, $currency);
+            }
+        } catch (Throwable $e) {
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            $this->clearAdminState($adminUserId);
+            return;
+        }
+
+        $this->recordAdminTransaction(
+            (int)$targetUserId,
+            $mode === 'debit' ? 'debit' : 'credit',
+            $amount,
+            $currency,
+            $mode,
+            [
+                'admin_user_id' => $adminUserId,
+                'admin_telegram_id' => $adminTelegramId,
+            ]
+        );
+
+        $actionText = $mode === 'debit'
+            ? ($strings['admin_wallet_debit_done'] ?? 'Debited %0.2f USD from %d.')
+            : ($strings['admin_wallet_credit_done'] ?? 'Credited %0.2f USD to %d.');
+        if ($mode === 'refund') {
+            $actionText = $strings['admin_wallet_refund_done'] ?? 'Refunded %0.2f USD to %d.';
+        }
+
+        $this->sendMessage(
+            $chatId,
+            sprintf($actionText, $amount, $targetTelegramId),
+            []
+        );
+
+        $userMessage = $mode === 'debit'
+            ? ($strings['admin_wallet_user_debit'] ?? 'An administrator removed %0.2f USD from your wallet.')
+            : ($strings['admin_wallet_user_credit'] ?? 'An administrator added %0.2f USD to your wallet.');
+        if ($mode === 'refund') {
+            $userMessage = $strings['admin_wallet_user_refund'] ?? 'A refund of %0.2f USD has been added to your wallet.';
+        }
+
+        $this->telegram->call('sendMessage', [
+            'chat_id' => $targetTelegramId,
+            'text' => sprintf($userMessage, $amount),
+        ]);
+
+        $this->logAdminAction(sprintf(
+            'Wallet %s %0.2f %s for user #%d',
+            $mode,
+            $amount,
+            $currency,
+            $targetTelegramId
+        ));
+
+        $this->clearAdminState($adminUserId);
+    }
+
+    private function handleBroadcast(string $message, int $chatId, array $strings): void
+    {
+        $trimmed = trim($message);
+        if ($trimmed === '') {
+            $this->sendMessage($chatId, $strings['admin_broadcast_prompt'] ?? 'Send the message you want to broadcast to all users.', []);
+            return;
+        }
+
+        $audience = $this->userManager->listAll();
+        $sent = 0;
+        foreach ($audience as $user) {
+            $telegramId = (int)$user['telegram_id'];
+            if ($telegramId <= 0) {
+                continue;
+            }
+
+            try {
+                $this->telegram->call('sendMessage', [
+                    'chat_id' => $telegramId,
+                    'text' => $trimmed,
+                ]);
+                $sent++;
+                usleep(150000); // reduce spam risk
+            } catch (Throwable $e) {
+                continue;
+            }
+        }
+
+        $this->sendMessage(
+            $chatId,
+            sprintf($strings['admin_broadcast_done'] ?? 'Broadcast sent to %d users.', $sent),
+            []
+        );
+    }
+
+    /**
+     * @return array{type:string,id:int}|null
+     */
+    private function parseRefundReference(string $value): ?array
+    {
+        $normalized = strtolower(trim($value));
+        $parts = explode(':', $normalized);
+        if (count($parts) !== 2) {
+            return null;
+        }
+        if (!in_array($parts[0], ['numbers', 'smm'], true)) {
+            return null;
+        }
+        if (!ctype_digit($parts[1])) {
+            return null;
+        }
+
+        return [
+            'type' => $parts[0],
+            'id' => (int)$parts[1],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function resolveRefundDetails(string $type, int $orderId): ?array
+    {
+        if ($type === 'numbers') {
+            $order = $this->numberOrders->find($orderId);
+            if (!$order) {
+                return null;
+            }
+            $amount = (float)($order['price_usd'] ?? 0);
+            $currency = (string)($order['currency'] ?? 'USD');
+            $status = (string)($order['status'] ?? '');
+            $userId = (int)($order['user_id'] ?? 0);
+            $telegramId = $this->resolveTelegramIdByUserId($userId);
+
+            return [
+                'type' => 'numbers',
+                'order_id' => $orderId,
+                'order' => $order,
+                'user_id' => $userId,
+                'telegram_id' => $telegramId,
+                'amount' => $amount,
+                'currency' => $currency,
+                'reference' => sprintf('number:%d', $orderId),
+                'already_refunded' => $status === 'refunded',
+            ];
+        }
+
+        $order = $this->smmOrders->find($orderId);
+        if (!$order) {
+            return null;
+        }
+        $amount = (float)($order['price'] ?? 0);
+        $currency = (string)($order['currency'] ?? 'USD');
+        $status = (string)($order['status'] ?? '');
+        $userId = (int)($order['user_id'] ?? 0);
+        $telegramId = $this->resolveTelegramIdByUserId($userId);
+
+        return [
+            'type' => 'smm',
+            'order_id' => $orderId,
+            'order' => $order,
+            'user_id' => $userId,
+            'telegram_id' => $telegramId,
+            'amount' => $amount,
+            'currency' => $currency,
+            'reference' => sprintf('smm:%d', $orderId),
+            'already_refunded' => in_array($status, ['canceled', 'refunded'], true),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $details
+     */
+    private function finalizeOrderRefund(
+        int $chatId,
+        int $adminDbId,
+        int $adminTelegramId,
+        array $details,
+        array $strings
+    ): void {
+        $userId = (int)$details['user_id'];
+        $amount = (float)$details['amount'];
+        $currency = (string)$details['currency'];
+        $telegramId = $details['telegram_id'] ?? null;
+
+        if ($userId <= 0) {
+            $this->clearAdminState($adminDbId);
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            return;
+        }
+
+        try {
+            $this->wallets->credit($userId, $amount, $currency);
+        } catch (Throwable $e) {
+            $this->clearAdminState($adminDbId);
+            $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+            return;
+        }
+
+        $this->recordAdminTransaction(
+            $userId,
+            'credit',
+            $amount,
+            $currency,
+            'refund',
+            [
+                'admin_user_id' => $adminDbId,
+                'admin_telegram_id' => $adminTelegramId,
+                'order_reference' => $details['reference'],
+            ]
+        );
+
+        $order = $details['order'];
+        $meta = $this->decodeOrderMetadata($order['meta'] ?? ($order['metadata'] ?? null));
+        $meta['admin_refund'] = [
+            'admin' => $adminTelegramId,
+            'amount' => $amount,
+            'currency' => $currency,
+            'timestamp' => time(),
+        ];
+
+        if ($details['type'] === 'numbers') {
+            $this->numberOrders->updateStatus((int)$details['order_id'], 'refunded', $meta);
+        } else {
+            $this->smmOrders->updateStatus((int)$details['order_id'], 'canceled', $meta);
+        }
+
+        $this->referralService->revertRewardByReference($details['reference']);
+
+        if ($telegramId) {
+            $this->telegram->call('sendMessage', [
+                'chat_id' => $telegramId,
+                'text' => sprintf($strings['admin_wallet_user_refund'] ?? 'A refund of %0.2f USD has been added to your wallet.', $amount),
+            ]);
+        }
+
+        $this->logAdminAction(sprintf(
+            'Refunded %0.2f %s for %s',
+            $amount,
+            $currency,
+            $details['reference']
+        ));
+
+        $this->clearAdminState($adminDbId);
+        $this->sendMessage($chatId, $strings['admin_wallet_refund_done'] ?? 'Refund completed successfully.', []);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<string, mixed>
+     */
+    private function decodeOrderMetadata($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    private function recordAdminTransaction(
+        int $userId,
+        string $direction,
+        float $amount,
+        string $currency,
+        string $mode,
+        array $meta = []
+    ): void {
+        $this->transactions->log(
+            $userId,
+            $direction,
+            $mode === 'refund' ? 'refund' : 'admin_manual',
+            $amount,
+            $currency,
+            $meta['order_reference'] ?? null,
+            $meta
+        );
+    }
+
+    private function resolveTelegramIdByUserId(int $userId): ?int
+    {
+        $user = $this->userManager->findById($userId);
+        return $user ? (int)$user['telegram_id'] : null;
+    }
+
     private function showAdminReferralsPanel(int $chatId, int $messageId, array $strings): void
     {
         $config = $this->settings->referrals();
@@ -1557,7 +2591,15 @@ class BotKernel
             "%s: %s\n%s",
             $strings['admin_stars_enabled_label'] ?? 'Enabled',
             ($config['enabled'] ?? false) ? 'ON' : 'OFF',
-            $strings['admin_referrals_hint'] ?? 'Use /referrals <telegram_id> to review a partner.'
+            sprintf(
+                "%s: %0.2f • %s: %0.2f%% • %s: %0.2f",
+                $strings['admin_referrals_flat'] ?? 'Flat reward',
+                (float)($config['reward_flat_usd'] ?? 0),
+                $strings['admin_referrals_percent'] ?? 'Percent',
+                (float)($config['reward_percent'] ?? 0),
+                $strings['admin_referrals_min_order'] ?? 'Min order',
+                (float)($config['min_order_usd'] ?? 0)
+            )
         );
 
         $keyboard = [
@@ -1565,6 +2607,10 @@ class BotKernel
                 [
                     'text' => $strings['admin_referrals_toggle_button'] ?? 'Toggle',
                     'callback_data' => 'admin:referrals:toggle',
+                ],
+                [
+                    'text' => $strings['admin_referrals_config_button'] ?? 'Configure',
+                    'callback_data' => 'admin:referrals:config',
                 ],
             ],
             [
@@ -2156,6 +3202,102 @@ class BotKernel
     /**
      * @param array<string, string> $strings
      */
+    private function showLanguageMenu(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $options = $this->languages->options();
+        $text = $strings['change_language_prompt'] ?? 'Choose your preferred language:';
+        $keyboard = [];
+        $row = [];
+        $current = $strings['_lang'] ?? '';
+
+        foreach ($options as $code => $label) {
+            $buttonText = $label;
+            if ($code === $current) {
+                $buttonText = '• ' . $label . ' •';
+            }
+
+            $row[] = [
+                'text' => $buttonText,
+                'callback_data' => sprintf('lang:set:%s', $code),
+            ];
+
+            if (count($row) === 2) {
+                $keyboard[] = $row;
+                $row = [];
+            }
+        }
+
+        if ($row !== []) {
+            $keyboard[] = $row;
+        }
+
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
+    private function handleLanguageCallback(
+        int $chatId,
+        int $messageId,
+        ?string $callbackId,
+        int $userDbId,
+        int $telegramUserId,
+        array $parts,
+        array $strings,
+        string $backLabel
+    ): void {
+        $action = $parts[1] ?? 'list';
+        if ($action !== 'set') {
+            $this->showLanguageMenu($chatId, $messageId, $strings, $backLabel);
+            return;
+        }
+
+        $code = $parts[2] ?? '';
+        $options = $this->languages->options();
+        if ($code === '' || !isset($options[$code])) {
+            $this->answerCallback(
+                $callbackId,
+                $strings['change_language_error'] ?? 'Unable to change language right now.',
+                true
+            );
+            return;
+        }
+
+        $normalized = $this->languages->ensure($code);
+        $this->userManager->updateLanguagePreference($userDbId, $normalized);
+        $this->cacheLanguage($telegramUserId, $normalized);
+
+        $updatedStrings = $this->languages->strings($normalized);
+        $changeLabel = $this->languages->label($normalized, 'change_language', 'Change Language');
+
+        $this->answerCallback(
+            $callbackId,
+            $updatedStrings['change_language_success'] ?? 'Language updated successfully.'
+        );
+
+        $this->editMessage(
+            $chatId,
+            $messageId,
+            $updatedStrings['main_menu'] ?? 'Main Menu',
+            $this->keyboardFactory->mainMenu($updatedStrings, $changeLabel, [
+                'features' => $this->features,
+                'is_admin' => $this->isAdmin($telegramUserId),
+            ])
+        );
+    }
+
+    /**
+     * @param array<string, string> $strings
+     */
     private function handleReferralCallback(
         int $chatId,
         int $messageId,
@@ -2246,6 +3388,137 @@ class BotKernel
         ];
 
         $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showRechargeInfo(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $template = $strings['charge_info'] ?? '';
+        if ($template === '') {
+            $template = $strings['menu_recharge'] ?? 'Recharge your balance.';
+        }
+
+        $text = trim($this->renderUserTemplate($template, $userDbId));
+        if ($text === '') {
+            $text = $strings['menu_recharge'] ?? 'Recharge your balance.';
+        }
+
+        $keyboard = [];
+        $chargeLink = $this->generalLink('charge_link');
+        if ($chargeLink) {
+            $keyboard[] = [
+                [
+                    'text' => $strings['menu_recharge'] ?? 'Recharge',
+                    'url' => $chargeLink,
+                ],
+            ];
+        }
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showPublicAgents(
+        int $chatId,
+        int $messageId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $agents = $this->settings->agents();
+        $lines = [];
+        foreach ($agents as $index => $agent) {
+            $label = sprintf('%d. %s', $index + 1, $agent['name']);
+            if (!empty($agent['username'])) {
+                $label .= ' (@' . ltrim((string)$agent['username'], '@') . ')';
+            }
+            $lines[] = $label;
+        }
+
+        $text = $strings['menu_agents'] ?? 'Agents';
+        $text .= PHP_EOL . PHP_EOL;
+        $text .= $lines !== [] ? implode(PHP_EOL, $lines) : ($strings['no_agents'] ?? 'No agents available.');
+
+        $keyboard = [
+            [
+                ['text' => $backLabel, 'callback_data' => 'back'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, trim($text), $keyboard);
+    }
+
+    private function showActivationsInfo(
+        int $chatId,
+        int $messageId,
+        int $userDbId,
+        array $strings,
+        string $backLabel
+    ): void {
+        $activationLink = $this->generalLink('activation_link');
+        $text = $strings['menu_bot_activations'] ?? 'Bot Activations';
+
+        $keyboard = [];
+        if ($activationLink) {
+            $text .= PHP_EOL . PHP_EOL . $activationLink;
+            $keyboard[] = [
+                [
+                    'text' => $strings['menu_bot_activations'] ?? 'Bot Activations',
+                    'url' => $activationLink,
+                ],
+            ];
+        } else {
+            $fallback = $strings['support_info'] ?? '';
+            if ($fallback !== '') {
+                $text .= PHP_EOL . PHP_EOL . $this->renderUserTemplate($fallback, $userDbId);
+            }
+        }
+
+        $keyboard[] = [
+            ['text' => $backLabel, 'callback_data' => 'back'],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function renderUserTemplate(string $template, int $userDbId): string
+    {
+        if ($template === '') {
+            return '';
+        }
+
+        $general = $this->settings->general();
+        $chargeLink = (string)($general['charge_link'] ?? '');
+        $supportLink = (string)($general['support_link'] ?? '');
+        $invitePoints = (string)($general['invite_points'] ?? 0);
+
+        $refLink = '';
+        if ($userDbId > 0) {
+            try {
+                $refLink = $this->referralService->generateShareLink($userDbId);
+            } catch (RuntimeException $e) {
+                $refLink = '';
+            }
+        }
+
+        return strtr($template, [
+            '{{charge_link}}' => $chargeLink,
+            '{{support_link}}' => $supportLink,
+            '{{invite_point}}' => $invitePoints,
+            '{{ref_link}}' => $refLink,
+        ]);
+    }
+
+    private function generalLink(string $key): ?string
+    {
+        $value = $this->settings->general()[$key] ?? '';
+        $value = is_string($value) ? trim($value) : '';
+        return $value !== '' ? $value : null;
     }
 
     /**
@@ -2404,6 +3677,9 @@ class BotKernel
         $command = strtolower($parts[0] ?? '');
 
         switch ($command) {
+            case '/admin':
+                $this->showAdminMenu($chatId, null, $strings);
+                return true;
             case '/tickets':
                 if (($parts[1] ?? '') === 'user' && isset($parts[2])) {
                     $this->sendTicketsForUser($chatId, $strings, $parts[2]);
@@ -2471,6 +3747,413 @@ class BotKernel
         }
 
         switch ($state['state'] ?? '') {
+            case 'await_wallet_user':
+                $telegramId = (int)preg_replace('/\D+/', '', $trimmed);
+                if ($telegramId <= 0) {
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+                    return true;
+                }
+                $user = $this->userManager->findByTelegramId($telegramId);
+                if (!$user) {
+                    $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+                    return true;
+                }
+                $state['state'] = 'await_wallet_amount';
+                $state['target_user_id'] = (int)$user['id'];
+                $state['target_telegram_id'] = $telegramId;
+                $this->setAdminState($userDbId, $state);
+                $this->sendMessage($chatId, $strings['admin_wallet_amount_prompt'] ?? 'Send the amount in USD.', []);
+                return true;
+            case 'await_wallet_amount':
+                if (!is_numeric($trimmed) || (float)$trimmed <= 0) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_invalid_amount'] ?? 'Send a positive numeric amount.', []);
+                    return true;
+                }
+                $this->completeWalletAdjustment(
+                    $chatId,
+                    $userDbId,
+                    $telegramUserId,
+                    $state,
+                    (float)$trimmed,
+                    $state['mode'] ?? 'credit',
+                    $strings
+                );
+                return true;
+            case 'await_wallet_refund_reference':
+                $parsed = $this->parseRefundReference($trimmed);
+                if ($parsed === null) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_invalid'] ?? 'Please follow the format numbers:ID or smm:ID.', []);
+                    return true;
+                }
+                $details = $this->resolveRefundDetails($parsed['type'], $parsed['id']);
+                if ($details === null) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_not_found'] ?? 'Order not found.', []);
+                    return true;
+                }
+                if ($details['already_refunded']) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_already'] ?? 'This order has already been processed.', []);
+                    return true;
+                }
+                $state['state'] = 'await_wallet_refund_confirm';
+                $state['refund_details'] = $details;
+                $this->setAdminState($userDbId, $state);
+                $this->sendMessage(
+                    $chatId,
+                    sprintf(
+                        $strings['admin_wallet_refund_confirm'] ?? 'Refund %0.2f USD for %s. Reply CONFIRM to proceed or /cancel to abort.',
+                        $details['amount'],
+                        strtoupper($details['reference'])
+                    ),
+                    []
+                );
+                return true;
+            case 'await_wallet_refund_confirm':
+                if (strcasecmp($trimmed, 'confirm') !== 0) {
+                    $this->sendMessage($chatId, $strings['admin_wallet_refund_confirm'] ?? 'Reply CONFIRM to proceed.', []);
+                    return true;
+                }
+                $details = $state['refund_details'] ?? null;
+                if (!is_array($details)) {
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage($chatId, $strings['admin_wallet_error'] ?? 'Operation aborted.', []);
+                    return true;
+                }
+                $this->finalizeOrderRefund($chatId, $userDbId, $telegramUserId, $details, $strings);
+                return true;
+            case 'await_user_ban':
+                $telegramId = (int)preg_replace('/\D+/', '', $trimmed);
+                if ($telegramId <= 0) {
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+                    return true;
+                }
+                $updated = $this->userManager->setBanStatusByTelegramId($telegramId, true);
+                if ($updated) {
+                    $this->sendMessage($chatId, $strings['admin_user_updated'] ?? 'User updated.', []);
+                } else {
+                    $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+                }
+                $this->clearAdminState($userDbId);
+                return true;
+            case 'await_user_unban':
+                $telegramId = (int)preg_replace('/\D+/', '', $trimmed);
+                if ($telegramId <= 0) {
+                    $this->sendMessage($chatId, $strings['admin_user_id_prompt'] ?? 'Provide a valid Telegram ID.', []);
+                    return true;
+                }
+                $updated = $this->userManager->setBanStatusByTelegramId($telegramId, false);
+                if ($updated) {
+                    $this->sendMessage($chatId, $strings['admin_user_updated'] ?? 'User updated.', []);
+                } else {
+                    $this->sendMessage($chatId, $strings['admin_user_not_found'] ?? 'User not found.', []);
+                }
+                $this->clearAdminState($userDbId);
+                return true;
+            case 'await_general_start':
+                $general = $this->settings->general();
+                $general['start_message'] = $trimmed === '/clear' ? null : $trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_general_help':
+                $general = $this->settings->general();
+                $general['help_text'] = $trimmed === '/clear' ? null : $trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_agent_add':
+                $parts = array_map('trim', explode('|', $trimmed));
+                if ($parts[0] === '') {
+                    $this->sendMessage($chatId, $strings['admin_agents_add_prompt'] ?? 'Send as Name|username (username optional).', []);
+                    return true;
+                }
+                $agents = $this->settings->agents();
+                $agents[] = [
+                    'name' => $parts[0],
+                    'username' => $parts[1] ?? null,
+                ];
+                $this->settings->updateAgents(['items' => $agents]);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_agents_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_agent_remove':
+                $needle = trim($trimmed, '@ ');
+                if ($needle === '') {
+                    $this->sendMessage($chatId, $strings['admin_agents_remove_prompt'] ?? 'Send the agent username or name to remove.', []);
+                    return true;
+                }
+                $agents = $this->settings->agents();
+                $filtered = array_values(array_filter($agents, function (array $agent) use ($needle): bool {
+                    if (strcasecmp($agent['name'], $needle) === 0) {
+                        return false;
+                    }
+                    if ($agent['username'] && strcasecmp(ltrim($agent['username'], '@'), ltrim($needle, '@')) === 0) {
+                        return false;
+                    }
+                    return true;
+                }));
+                $this->settings->updateAgents(['items' => $filtered]);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_agents_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_maintenance_message':
+                $config = $this->settings->maintenance();
+                $config['message'] = $trimmed === '/clear' ? null : $trimmed;
+                $this->settings->updateMaintenance($config);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_catalog_margin':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 10 أو 15 أو 12.5). سيتم إضافة هذه النسبة إلى سعر الأرقام من المزود.', []);
+                    return true;
+                }
+                $newMargin = (float)$trimmed;
+                $general = $this->settings->general();
+                $general['pricing_margin_percent'] = $newMargin;
+                $this->settings->updateGeneral($general);
+                
+                // تحديث نسبة الربح لجميع الدول
+                try {
+                    $allCountries = $this->numberCatalog->allRaw();
+                    $updated = 0;
+                    // التأكد من وجود provider_id افتراضي
+                    $defaultProviderId = 1;
+                    foreach ($allCountries as $country) {
+                        $providerId = isset($country['provider_id']) && $country['provider_id'] > 0 
+                            ? (int)$country['provider_id'] 
+                            : $defaultProviderId;
+                        
+                        // التحقق من وجود provider_id في قاعدة البيانات
+                        if ($providerId <= 0) {
+                            $providerId = $defaultProviderId;
+                        }
+                        
+                        $this->numberCatalog->upsert([
+                            'code' => $country['code'],
+                            'name' => $country['name'],
+                            'name_translations' => $country['name_translations'] ?? null,
+                            'price_usd' => $country['price_usd'],
+                            'margin_percent' => $newMargin,
+                            'provider_id' => $providerId,
+                            'is_active' => isset($country['is_active']) ? (int)$country['is_active'] : 1,
+                        ]);
+                        $updated++;
+                    }
+                } catch (Throwable $e) {
+                    error_log("Error updating margin: " . $e->getMessage());
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage($chatId, 'حدث خطأ أثناء تحديث نسبة الربح: ' . $e->getMessage(), []);
+                    return true;
+                }
+                
+                $this->clearAdminState($userDbId);
+                $message = sprintf(
+                    $strings['admin_catalog_margin_updated'] ?? 'تم تحديث نسبة الربح إلى %0.2f%% لجميع الدول (%d دولة).',
+                    $newMargin,
+                    $updated
+                );
+                $this->sendMessage($chatId, $message, []);
+                return true;
+            case 'await_pricing_margin':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 10 أو 15 أو 12.5). سيتم إضافة هذه النسبة إلى سعر الأرقام من المزود.', []);
+                    return true;
+                }
+                $general = $this->settings->general();
+                $general['pricing_margin_percent'] = (float)$trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'تم الحفظ.', []);
+                return true;
+            case 'await_transfer_fee':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_transfer_fee_prompt'] ?? 'Send the transfer fee percent (e.g. 2.5).', []);
+                    return true;
+                }
+                $general = $this->settings->general();
+                $general['transfer_fee_percent'] = (float)$trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_transfer_min':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_transfer_min_prompt'] ?? 'Send the minimum transfer amount.', []);
+                    return true;
+                }
+                $general = $this->settings->general();
+                $general['transfer_minimum'] = (float)$trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_pricing_custom':
+                $parts = preg_split('/\s+/', strtoupper($trimmed));
+                if (count($parts) !== 2 || !is_numeric($parts[1])) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_custom_prompt'] ?? 'Send the country code and price as: US 1.75', []);
+                    return true;
+                }
+                $raw = $this->numberCatalog->findRaw($parts[0]);
+                if (!$raw) {
+                    $this->sendMessage($chatId, $strings['admin_catalog_not_found'] ?? 'Country not found.', []);
+                    return true;
+                }
+                $payload = $this->prepareCountryPayload($raw, (float)$parts[1]);
+                $this->numberCatalog->upsert($payload);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_country_payload':
+                $segments = explode('|', $trimmed);
+                if (count($segments) < 4) {
+                    $this->sendMessage($chatId, $strings['admin_catalog_country_prompt'] ?? 'Send data as CODE|Name|PriceUSD|ProviderID|Margin%.', []);
+                    return true;
+                }
+                $payload = [
+                    'code' => strtoupper(trim($segments[0])),
+                    'name' => trim($segments[1]),
+                    'price_usd' => (float)$segments[2],
+                    'provider_id' => (int)$segments[3],
+                    'margin_percent' => isset($segments[4]) ? (float)$segments[4] : 0,
+                ];
+                if (isset($segments[5]) && trim($segments[5]) !== '') {
+                    $decoded = json_decode(trim($segments[5]), true);
+                    if (is_array($decoded)) {
+                        $payload['name_translations'] = $decoded;
+                    }
+                }
+                $this->numberCatalog->upsert($payload);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_country_delete':
+                $code = strtoupper($trimmed);
+                if ($code === '') {
+                    $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send the country code to remove.', []);
+                    return true;
+                }
+                $existingOrders = $this->numberOrders->countByCountry($code);
+                if ($existingOrders > 0) {
+                    $this->numberCatalog->setActive($code, false);
+                    $this->sendMessage($chatId, $strings['admin_catalog_deactivated'] ?? 'Country disabled because it has existing orders.', []);
+                } else {
+                    $this->numberCatalog->delete($code);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
+                $this->clearAdminState($userDbId);
+                return true;
+            case 'await_country_import':
+                $lines = preg_split('/\R+/', $trimmed);
+                $count = 0;
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '') {
+                        continue;
+                    }
+                    $parts = preg_split('/\s+/', $line);
+                    if (count($parts) !== 2 || !is_numeric($parts[1])) {
+                        continue;
+                    }
+                    $raw = $this->numberCatalog->findRaw($parts[0]);
+                    if ($raw) {
+                        $payload = $this->prepareCountryPayload($raw, (float)$parts[1]);
+                        $this->numberCatalog->upsert($payload);
+                        $count++;
+                    }
+                }
+                $this->clearAdminState($userDbId);
+                $this->sendMessage(
+                    $chatId,
+                    sprintf($strings['admin_catalog_import_done'] ?? 'Updated %d countries.', $count),
+                    []
+                );
+                return true;
+            case 'await_smm_category_add':
+                $parts = array_map('trim', explode('|', $trimmed));
+                if (count($parts) < 2) {
+                    $this->sendMessage($chatId, $strings['admin_smm_category_prompt'] ?? 'Send as CODE|Name|Caption|SortOrder.', []);
+                    return true;
+                }
+                $sortOrder = isset($parts[3]) && is_numeric($parts[3]) ? (int)$parts[3] : 0;
+                $this->smmCatalog->createCategory($parts[0], $parts[1], $parts[2] ?? null, $sortOrder);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_smm_category_remove':
+                $code = trim($trimmed);
+                if ($code === '') {
+                    $this->sendMessage($chatId, $strings['admin_smm_category_remove_prompt'] ?? 'Send the category code to remove.', []);
+                    return true;
+                }
+                $services = array_filter($this->smmCatalog->allServices(), fn (array $service): bool => strcasecmp((string)$service['category_id'], $code) === 0);
+                if ($services !== []) {
+                    $this->smmCatalog->setCategoryActive($code, false);
+                    $this->sendMessage($chatId, $strings['admin_smm_category_disabled'] ?? 'Category disabled because it still has services/orders.', []);
+                } else {
+                    $this->smmCatalog->deleteCategory($code);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
+                $this->clearAdminState($userDbId);
+                return true;
+            case 'await_smm_service_add':
+                $parts = array_map('trim', explode('|', $trimmed));
+                if (count($parts) < 7) {
+                    $this->sendMessage($chatId, $strings['admin_smm_service_prompt'] ?? 'Send as CATEGORY_CODE|ProviderCode|Name|Rate|Min|Max|Currency.', []);
+                    return true;
+                }
+                $targetCategory = $this->smmCatalog->categoryByCode($parts[0]);
+                if (!$targetCategory) {
+                    $this->sendMessage($chatId, $strings['admin_smm_category_not_found'] ?? 'Category not found.', []);
+                    return true;
+                }
+                $this->smmCatalog->createService([
+                    'category_id' => $targetCategory['id'],
+                    'provider_code' => $parts[1],
+                    'name' => $parts[2],
+                    'rate_per_1k' => (float)$parts[3],
+                    'min_quantity' => (int)$parts[4],
+                    'max_quantity' => (int)$parts[5],
+                    'currency' => $parts[6] ?: 'USD',
+                ]);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_smm_service_remove':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_smm_service_remove_prompt'] ?? 'Send the service ID to remove.', []);
+                    return true;
+                }
+                $serviceId = (int)$trimmed;
+                $existingOrders = $this->smmOrders->countByService($serviceId);
+                if ($existingOrders > 0) {
+                    $this->smmCatalog->setServiceActive($serviceId, false);
+                    $this->sendMessage($chatId, $strings['admin_smm_service_disabled'] ?? 'Service disabled because it has existing orders.', []);
+                } else {
+                    $this->smmCatalog->deleteService($serviceId);
+                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                }
+                $this->clearAdminState($userDbId);
+                return true;
+            case 'await_referral_config':
+                $parts = array_map('trim', explode('|', $trimmed));
+                if (count($parts) < 3 || !is_numeric($parts[0]) || !is_numeric($parts[1]) || !is_numeric($parts[2])) {
+                    $this->sendMessage($chatId, $strings['admin_referrals_config_prompt'] ?? 'Send flat reward, percent, min order (e.g. 1.5|5|2).', []);
+                    return true;
+                }
+                $config = $this->settings->referrals();
+                $config['reward_flat_usd'] = (float)$parts[0];
+                $config['reward_percent'] = (float)$parts[1];
+                $config['min_order_usd'] = (float)$parts[2];
+                $this->settings->updateReferrals($config);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                return true;
+            case 'await_broadcast_message':
+                $this->handleBroadcast($trimmed, $chatId, $strings);
+                $this->clearAdminState($userDbId);
+                return true;
             case 'await_star_price':
                 $value = (float)$trimmed;
                 if ($value <= 0) {
@@ -3132,6 +4815,41 @@ class BotKernel
     private function isAdmin(int $telegramId): bool
     {
         return in_array($telegramId, $this->settings->admins(), true);
+    }
+
+    private function prepareCountryPayload(array $raw, ?float $priceOverride = null): array
+    {
+        if (isset($raw['name_translations']) && is_string($raw['name_translations'])) {
+            $decoded = json_decode($raw['name_translations'], true);
+            $raw['name_translations'] = is_array($decoded) ? $decoded : null;
+        }
+        if ($priceOverride !== null) {
+            $raw['price_usd'] = $priceOverride;
+        }
+
+        return $raw;
+    }
+
+    private function buildStartMessage(array $strings, array $userRecord, array $telegramUser): string
+    {
+        $general = $this->settings->general();
+        $template = $general['start_message'] ?? ($strings['welcome'] ?? 'Welcome');
+        $userDbId = (int)($userRecord['id'] ?? 0);
+        $balance = 0.0;
+        if ($userDbId > 0) {
+            try {
+                $balance = $this->wallets->balance($userDbId, 'USD');
+            } catch (Throwable $e) {
+            }
+        }
+
+        $replacements = [
+            '{{user_id}}' => (string)($userRecord['telegram_id'] ?? ''),
+            '{{user_name}}' => (string)($telegramUser['first_name'] ?? ($telegramUser['username'] ?? '')),
+            '{{balance}}' => number_format($balance, 2),
+        ];
+
+        return strtr($template, $replacements);
     }
 
     private function refreshFeatures(): void
