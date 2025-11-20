@@ -3903,14 +3903,37 @@ class BotKernel
             case 'await_pricing_margin':
             case 'await_catalog_margin':
                 if (!is_numeric($trimmed)) {
-                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 15 أو 12.5).', []);
+                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 10 أو 15 أو 12.5). سيتم إضافة هذه النسبة إلى سعر الأرقام من المزود.', []);
                     return true;
                 }
-        $general = $this->settings->general();
-        $general['pricing_margin_percent'] = (float)$trimmed;
-        $this->settings->updateGeneral($general);
+                $newMargin = (float)$trimmed;
+                $general = $this->settings->general();
+                $general['pricing_margin_percent'] = $newMargin;
+                $this->settings->updateGeneral($general);
+                
+                // تحديث نسبة الربح لجميع الدول
+                $allCountries = $this->numberCatalog->allRaw();
+                $updated = 0;
+                foreach ($allCountries as $country) {
+                    $this->numberCatalog->upsert([
+                        'code' => $country['code'],
+                        'name' => $country['name'],
+                        'name_translations' => $country['name_translations'] ?? null,
+                        'price_usd' => $country['price_usd'],
+                        'margin_percent' => $newMargin,
+                        'provider_id' => $country['provider_id'] ?? 1,
+                        'is_active' => $country['is_active'] ?? 1,
+                    ]);
+                    $updated++;
+                }
+                
                 $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'تم الحفظ.', []);
+                $message = sprintf(
+                    $strings['admin_catalog_margin_updated'] ?? 'تم تحديث نسبة الربح إلى %0.2f%% لجميع الدول (%d دولة).',
+                    $newMargin,
+                    $updated
+                );
+                $this->sendMessage($chatId, $message, []);
                 return true;
             case 'await_transfer_fee':
                 if (!is_numeric($trimmed)) {
