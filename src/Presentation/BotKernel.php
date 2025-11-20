@@ -207,7 +207,8 @@ class BotKernel
             return;
         }
 
-        if (!$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
+        // التحقق من الاشتراك الإجباري (لكن لا نمنع الأدمن)
+        if (!$this->isAdmin($telegramUserId) && !$this->enforceSubscription($chatId, (int)$userRecord['telegram_id'], $strings)) {
             return;
         }
 
