@@ -20,3 +20,5 @@
 [2025-11-20T01:17:05+00:00] sendMessage: API error (400): Bad Request: chat not found
 [2025-11-20T01:25:16+00:00] getChatMember: API error (400): Bad Request: PARTICIPANT_ID_INVALID
 [2025-11-20T01:25:17+00:00] sendMessage: API error (400): Bad Request: chat not found
+[2025-11-20T02:39:15+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
+[2025-11-20T02:39:35+00:00] editMessageText: API error (400): Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message
