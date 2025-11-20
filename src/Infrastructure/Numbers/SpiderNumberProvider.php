@@ -101,4 +101,50 @@ class SpiderNumberProvider implements NumberProviderInterface
             'password' => $result['password'] ?? '',
         ];
     }
+
+    /**
+     * @return array<string, float> Returns country code => base price mapping
+     */
+    public function getCountries(): array
+    {
+        $query = http_build_query([
+            'apiKey' => $this->apiKey,
+            'action' => 'getCountrys',
+        ]);
+        $url = "{$this->baseUrl}?{$query}";
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECT_TIMEOUT => 5,
+        ]);
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException("Spider request failed: {$error}");
+        }
+        curl_close($ch);
+
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded) || ($decoded['error'] ?? '') !== 'INFORMATION_SUCCESS') {
+            throw new RuntimeException('Spider provider returned an error while fetching countries.');
+        }
+
+        $countries = $decoded['result']['countries'][1] ?? [];
+        if (!is_array($countries)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($countries as $code => $price) {
+            if (is_string($code) && is_numeric($price)) {
+                $result[strtoupper($code)] = (float)$price;
+            }
+        }
+
+        return $result;
+    }
 }

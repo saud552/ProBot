@@ -8,6 +8,7 @@ use App\Domain\Localization\LanguageManager;
 use App\Domain\Notifications\NotificationService;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
+use App\Domain\Numbers\NumberCountryImportService;
 use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Payments\StarPaymentService;
 use App\Domain\Referrals\ReferralService;
@@ -49,6 +50,7 @@ class BotKernel
     private TransactionService $transactions;
     private NumberOrderRepository $numberOrders;
     private SmmOrderRepository $smmOrders;
+    private NumberCountryImportService $countryImport;
 
     /**
      * @var array<int, string>
@@ -91,7 +93,8 @@ class BotKernel
         SettingsService $settings,
         TransactionService $transactions,
         NumberOrderRepository $numberOrders,
-        SmmOrderRepository $smmOrders
+        SmmOrderRepository $smmOrders,
+        NumberCountryImportService $countryImport
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -113,6 +116,7 @@ class BotKernel
         $this->transactions = $transactions;
         $this->numberOrders = $numberOrders;
         $this->smmOrders = $smmOrders;
+        $this->countryImport = $countryImport;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
         $this->ticketFlow = $this->store->load('support_flow', []);
@@ -1408,6 +1412,11 @@ class BotKernel
                         $this->answerCallback($callbackId, '✅');
                         return;
                     }
+                    if ($action === 'panel') {
+                        $this->showAdminCatalogPanel($chatId, $messageId, $strings);
+                        $this->answerCallback($callbackId, '✅');
+                        return;
+                    }
                     if ($action === 'add') {
                         $this->setAdminState($userDbId, ['state' => 'await_country_payload']);
                         $this->answerCallback($callbackId, '✍️');
@@ -1425,13 +1434,42 @@ class BotKernel
                         return;
                     }
                     if ($action === 'import') {
-                        $this->setAdminState($userDbId, ['state' => 'await_country_import']);
+                        $this->showAdminCountryImportMenu($chatId, $messageId, $strings);
+                        $this->answerCallback($callbackId, '✅');
+                        return;
+                    }
+                    if ($action === 'import_all') {
+                        try {
+                            $result = $this->countryImport->importAll();
+                            $msg = sprintf(
+                                $strings['admin_country_import_all_success'] ?? '✅ Imported: %d, Updated: %d, Failed: %d',
+                                $result['imported'],
+                                $result['updated'],
+                                $result['failed']
+                            );
+                            $this->sendMessage($chatId, $msg, []);
+                            $this->logAdminAction("Imported all countries: {$result['imported']} new, {$result['updated']} updated");
+                        } catch (\Exception $e) {
+                            $this->sendMessage($chatId, $strings['admin_country_import_error'] ?? 'Error: ' . $e->getMessage(), []);
+                        }
+                        $this->showAdminCountryImportMenu($chatId, $messageId, $strings);
+                        $this->answerCallback($callbackId, '✅');
+                        return;
+                    }
+                    if ($action === 'import_single') {
+                        $this->setAdminState($userDbId, ['state' => 'await_country_import_single']);
                         $this->answerCallback($callbackId, '✍️');
                         $this->sendMessage(
                             $chatId,
-                            $strings['admin_catalog_import_prompt'] ?? 'Send lines in the format CODE PRICE per line.',
+                            $strings['admin_country_import_single_prompt'] ?? 'Send country code to import (e.g. US)',
                             []
                         );
+                        return;
+                    }
+                    if ($action === 'delete') {
+                        $this->setAdminState($userDbId, ['state' => 'await_country_delete']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send the country code to remove.', []);
                         return;
                     }
                 }
@@ -1862,7 +1900,7 @@ class BotKernel
                 ['text' => $strings['admin_catalog_numbers_add'] ?? 'Add Country', 'callback_data' => 'admin:catalog:numbers:add'],
             ],
             [
-                ['text' => $strings['admin_catalog_numbers_remove'] ?? 'Remove Country', 'callback_data' => 'admin:catalog:numbers:remove'],
+                ['text' => $strings['admin_catalog_numbers_remove'] ?? 'Remove Country', 'callback_data' => 'admin:catalog:numbers:delete'],
                 ['text' => $strings['admin_catalog_numbers_import'] ?? 'Import Countries', 'callback_data' => 'admin:catalog:numbers:import'],
             ],
             [
@@ -1871,6 +1909,24 @@ class BotKernel
             ],
             [
                 ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:root'],
+            ],
+        ];
+
+        $this->editMessage($chatId, $messageId, $text, $keyboard);
+    }
+
+    private function showAdminCountryImportMenu(int $chatId, int $messageId, array $strings): void
+    {
+        $text = $strings['admin_country_import_title'] ?? 'Import Countries from Provider';
+        $keyboard = [
+            [
+                ['text' => $strings['admin_country_import_all'] ?? 'Import All Countries', 'callback_data' => 'admin:catalog:numbers:import_all'],
+            ],
+            [
+                ['text' => $strings['admin_country_import_single'] ?? 'Import Single Country', 'callback_data' => 'admin:catalog:numbers:import_single'],
+            ],
+            [
+                ['text' => $strings['back'] ?? 'Back', 'callback_data' => 'admin:catalog:numbers:panel'],
             ],
         ];
 
@@ -3765,11 +3821,22 @@ class BotKernel
                     $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'Send the global margin percentage (e.g. 15 or 12.5).', []);
                     return true;
                 }
-        $general = $this->settings->general();
-        $general['pricing_margin_percent'] = (float)$trimmed;
-        $this->settings->updateGeneral($general);
-                $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                try {
+                    $margin = (float)$trimmed;
+                    $updated = $this->countryImport->updateGlobalMargin($margin);
+                    $general = $this->settings->general();
+                    $general['pricing_margin_percent'] = $margin;
+                    $this->settings->updateGeneral($general);
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage(
+                        $chatId,
+                        sprintf($strings['admin_pricing_margin_success'] ?? '✅ Updated margin to %.2f%% for %d countries.', $margin, $updated),
+                        []
+                    );
+                    $this->logAdminAction("Updated global margin to {$margin}% for {$updated} countries");
+                } catch (\Exception $e) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_error'] ?? 'Error: ' . $e->getMessage(), []);
+                }
                 return true;
             case 'await_transfer_fee':
                 if (!is_numeric($trimmed)) {
@@ -3795,19 +3862,64 @@ class BotKernel
                 return true;
             case 'await_pricing_custom':
                 $parts = preg_split('/\s+/', strtoupper($trimmed));
-                if (count($parts) !== 2 || !is_numeric($parts[1])) {
-                    $this->sendMessage($chatId, $strings['admin_pricing_custom_prompt'] ?? 'Send the country code and price as: US 1.75', []);
+                if (count($parts) < 2 || !is_numeric($parts[1])) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_custom_prompt'] ?? 'Send the country code and price as: US 1.75 (optional margin: US 1.75 15)', []);
                     return true;
                 }
-                $raw = $this->numberCatalog->findRaw($parts[0]);
-                if (!$raw) {
-                    $this->sendMessage($chatId, $strings['admin_catalog_not_found'] ?? 'Country not found.', []);
+                try {
+                    $code = $parts[0];
+                    $price = (float)$parts[1];
+                    $margin = isset($parts[2]) && is_numeric($parts[2]) ? (float)$parts[2] : null;
+                    $this->countryImport->updateCountryPrice($code, $price, $margin);
+                    $this->clearAdminState($userDbId);
+                    $msg = sprintf(
+                        $strings['admin_pricing_custom_success'] ?? '✅ Updated %s price to $%.2f%s',
+                        $code,
+                        $price,
+                        $margin !== null ? " with {$margin}% margin" : ''
+                    );
+                    $this->sendMessage($chatId, $msg, []);
+                    $this->logAdminAction("Updated country {$code} price to {$price}" . ($margin !== null ? " with {$margin}% margin" : ''));
+                } catch (\Exception $e) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_error'] ?? 'Error: ' . $e->getMessage(), []);
+                }
+                return true;
+            case 'await_country_import_single':
+                $code = strtoupper(trim($trimmed));
+                if (strlen($code) !== 2 || !preg_match('/^[A-Z]{2}$/', $code)) {
+                    $this->sendMessage($chatId, $strings['admin_country_import_single_prompt'] ?? 'Send a valid 2-letter country code (e.g. US).', []);
                     return true;
                 }
-                $payload = $this->prepareCountryPayload($raw, (float)$parts[1]);
-                $this->numberCatalog->upsert($payload);
-                $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                try {
+                    $this->countryImport->importSingle($code);
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage($chatId, sprintf($strings['admin_country_import_single_success'] ?? '✅ Country %s imported successfully.', $code), []);
+                    $this->logAdminAction("Imported country {$code}");
+                } catch (\Exception $e) {
+                    $this->sendMessage($chatId, $strings['admin_country_import_error'] ?? 'Error: ' . $e->getMessage(), []);
+                }
+                return true;
+            case 'await_country_delete':
+                $code = strtoupper(trim($trimmed));
+                if (strlen($code) !== 2 || !preg_match('/^[A-Z]{2}$/', $code)) {
+                    $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send a valid 2-letter country code to remove.', []);
+                    return true;
+                }
+                try {
+                    $existingOrders = $this->numberOrders->countByCountry($code);
+                    if ($existingOrders > 0) {
+                        $this->numberCatalog->setActive($code, false);
+                        $this->clearAdminState($userDbId);
+                        $this->sendMessage($chatId, $strings['admin_catalog_deactivated'] ?? 'Country disabled because it has existing orders.', []);
+                    } else {
+                        $this->countryImport->delete($code);
+                        $this->clearAdminState($userDbId);
+                        $this->sendMessage($chatId, sprintf($strings['admin_country_delete_success'] ?? '✅ Country %s deleted successfully.', $code), []);
+                        $this->logAdminAction("Deleted country {$code}");
+                    }
+                } catch (\Exception $e) {
+                    $this->sendMessage($chatId, $strings['admin_country_delete_error'] ?? 'Error: ' . $e->getMessage(), []);
+                }
                 return true;
             case 'await_country_payload':
                 $segments = explode('|', $trimmed);
@@ -3831,22 +3943,6 @@ class BotKernel
                 $this->numberCatalog->upsert($payload);
                 $this->clearAdminState($userDbId);
                 $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
-                return true;
-            case 'await_country_delete':
-                $code = strtoupper($trimmed);
-                if ($code === '') {
-                    $this->sendMessage($chatId, $strings['admin_catalog_remove_prompt'] ?? 'Send the country code to remove.', []);
-                    return true;
-                }
-                $existingOrders = $this->numberOrders->countByCountry($code);
-                if ($existingOrders > 0) {
-                    $this->numberCatalog->setActive($code, false);
-                    $this->sendMessage($chatId, $strings['admin_catalog_deactivated'] ?? 'Country disabled because it has existing orders.', []);
-                } else {
-                    $this->numberCatalog->delete($code);
-                    $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
-                }
-                $this->clearAdminState($userDbId);
                 return true;
             case 'await_country_import':
                 $lines = preg_split('/\R+/', $trimmed);

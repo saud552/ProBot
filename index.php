@@ -7,6 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use App\Domain\Localization\LanguageManager;
 use App\Domain\Numbers\NumberCatalogService;
 use App\Domain\Numbers\NumberCodeService;
+use App\Domain\Numbers\NumberCountryImportService;
 use App\Domain\Numbers\NumberPurchaseService;
 use App\Domain\Referrals\ReferralService;
 use App\Domain\Smm\SmmCatalogService;
@@ -75,6 +76,7 @@ $userManager = new UserManager($userRepository);
 $wallets = new WalletService($walletRepository);
 $numberCatalog = new NumberCatalogService($countryRepository);
 $numberProvider = new SpiderNumberProvider($providersConfig['numbers']['spider'] ?? []);
+$numberCountryImport = new NumberCountryImportService($numberProvider, $countryRepository, 1);
 $smmProvider = new OrbitexaProvider($providersConfig['smm']['orbitexa'] ?? []);
 $settingsService = new SettingsService($settingsRepository);
 $forcedSubscription = new ForcedSubscriptionService($settingsService, $telegram);
@@ -138,7 +140,8 @@ $kernel = new BotKernel(
     $settingsService,
     $transactionService,
     $orderRepository,
-    $smmOrderRepository
+    $smmOrderRepository,
+    $numberCountryImport
 );
 
 $payload = file_get_contents('php://input');
