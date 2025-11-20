@@ -3,3 +3,23 @@
 [Thu Nov 20 01:13:35 2025] 127.0.0.1:42118 Closing
 [Thu Nov 20 01:13:49 2025] 127.0.0.1:45442 Accepted
 [Thu Nov 20 01:13:51 2025] 127.0.0.1:45442 Closing
+[Thu Nov 20 01:14:54 2025] 127.0.0.1:35710 Accepted
+[Thu Nov 20 01:14:55 2025] 127.0.0.1:35710 Closing
+[Thu Nov 20 01:14:59 2025] 127.0.0.1:42306 Accepted
+[Thu Nov 20 01:15:01 2025] 127.0.0.1:42306 Closing
+[Thu Nov 20 01:15:02 2025] 127.0.0.1:42316 Accepted
+[Thu Nov 20 01:15:04 2025] 127.0.0.1:42316 Closing
+[Thu Nov 20 01:15:05 2025] 127.0.0.1:43286 Accepted
+[Thu Nov 20 01:15:06 2025] 127.0.0.1:43286 Closing
+[Thu Nov 20 01:15:14 2025] 127.0.0.1:35778 Accepted
+[Thu Nov 20 01:15:14 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
+Stack trace:
+#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
+#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
+#2 /workspace/src/Presentation/BotKernel.php(3997): App\Domain\Numbers\NumberCatalogService->upsert()
+#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
+#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
+#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
+#6 {main}
+  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
+[Thu Nov 20 01:15:14 2025] 127.0.0.1:35778 Closing
