@@ -138,7 +138,8 @@ $kernel = new BotKernel(
     $settingsService,
     $transactionService,
     $orderRepository,
-    $smmOrderRepository
+    $smmOrderRepository,
+    $numberProvider
 );
 
 $payload = file_get_contents('php://input');
