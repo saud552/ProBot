@@ -950,9 +950,8 @@ class BotKernel
     private function formatCountryLine(array $country): string
     {
         return sprintf(
-            '%s (%s) • $%0.2f',
+            '%s • $%0.2f',
             $this->esc($this->countryDisplayName($country)),
-            $this->esc($country['code']),
             $country['price_usd']
         );
     }
@@ -960,9 +959,8 @@ class BotKernel
     private function formatStarCountryLine(array $country): string
     {
         return sprintf(
-            '%s (%s) • $%0.2f ≈ %d⭐️',
+            '%s • $%0.2f ≈ %d⭐️',
             $this->esc($this->countryDisplayName($country)),
-            $this->esc($country['code']),
             $country['price_usd'],
             $this->convertUsdToStars((float)$country['price_usd'])
         );
@@ -1450,6 +1448,8 @@ class BotKernel
                                 );
                                 return;
                             }
+                            // تحميل ترجمات أسماء الدول
+                            $countryNames = require APP_BASE_PATH . '/lang/country_names.php';
                             $general = $this->settings->general();
                             $margin = (float)($general['pricing_margin_percent'] ?? 0);
                             $applied = 0;
@@ -1458,18 +1458,37 @@ class BotKernel
                                 $existingCountries[strtoupper($existing['code'])] = $existing;
                             }
                             foreach ($countries as $code => $basePrice) {
-                                $finalPrice = $basePrice;
-                                if ($margin !== 0.0) {
-                                    $finalPrice += $basePrice * ($margin / 100);
-                                }
-                                $finalPrice = round($finalPrice, 2);
+                                $basePrice = round((float)$basePrice, 2);
                                 $existing = $existingCountries[$code] ?? null;
+                                
+                                // إعداد الترجمات من ملف country_names.php
+                                $translations = [];
+                                foreach ($countryNames as $lang => $names) {
+                                    if (isset($names[$code])) {
+                                        $translations[$lang] = $names[$code];
+                                    }
+                                }
+                                
+                                // تحديد الاسم الافتراضي (العربي أو الإنجليزي)
+                                $defaultName = $translations['ar'] ?? $translations['en'] ?? $code;
+                                
                                 if ($existing) {
+                                    // دمج الترجمات الموجودة مع الجديدة
+                                    $existingTranslations = [];
+                                    if (isset($existing['name_translations'])) {
+                                        if (is_string($existing['name_translations'])) {
+                                            $decoded = json_decode($existing['name_translations'], true);
+                                            $existingTranslations = is_array($decoded) ? $decoded : [];
+                                        } elseif (is_array($existing['name_translations'])) {
+                                            $existingTranslations = $existing['name_translations'];
+                                        }
+                                    }
+                                    $mergedTranslations = array_merge($translations, $existingTranslations);
                                     $payload = [
                                         'code' => $code,
-                                        'name' => $existing['name'],
-                                        'name_translations' => $existing['name_translations'] ?? null,
-                                        'price_usd' => $finalPrice,
+                                        'name' => $existing['name'] ?: $defaultName,
+                                        'name_translations' => $mergedTranslations,
+                                        'price_usd' => $basePrice,
                                         'margin_percent' => $margin,
                                         'provider_id' => $existing['provider_id'] ?? 1,
                                         'is_active' => $existing['is_active'] ?? 1,
@@ -1477,9 +1496,9 @@ class BotKernel
                                 } else {
                                     $payload = [
                                         'code' => $code,
-                                        'name' => $code,
-                                        'name_translations' => null,
-                                        'price_usd' => $finalPrice,
+                                        'name' => $defaultName,
+                                        'name_translations' => $translations,
+                                        'price_usd' => $basePrice,
                                         'margin_percent' => $margin,
                                         'provider_id' => 1,
                                         'is_active' => 1,
