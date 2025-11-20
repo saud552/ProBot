@@ -3908,25 +3908,37 @@ class BotKernel
                 $this->settings->updateGeneral($general);
                 
                 // تحديث نسبة الربح لجميع الدول
-                $allCountries = $this->numberCatalog->allRaw();
-                $updated = 0;
-                // التأكد من وجود provider_id افتراضي
-                $defaultProviderId = 1;
-                foreach ($allCountries as $country) {
-                    $providerId = isset($country['provider_id']) && $country['provider_id'] > 0 
-                        ? (int)$country['provider_id'] 
-                        : $defaultProviderId;
-                    
-                    $this->numberCatalog->upsert([
-                        'code' => $country['code'],
-                        'name' => $country['name'],
-                        'name_translations' => $country['name_translations'] ?? null,
-                        'price_usd' => $country['price_usd'],
-                        'margin_percent' => $newMargin,
-                        'provider_id' => $providerId,
-                        'is_active' => isset($country['is_active']) ? (int)$country['is_active'] : 1,
-                    ]);
-                    $updated++;
+                try {
+                    $allCountries = $this->numberCatalog->allRaw();
+                    $updated = 0;
+                    // التأكد من وجود provider_id افتراضي
+                    $defaultProviderId = 1;
+                    foreach ($allCountries as $country) {
+                        $providerId = isset($country['provider_id']) && $country['provider_id'] > 0 
+                            ? (int)$country['provider_id'] 
+                            : $defaultProviderId;
+                        
+                        // التحقق من وجود provider_id في قاعدة البيانات
+                        if ($providerId <= 0) {
+                            $providerId = $defaultProviderId;
+                        }
+                        
+                        $this->numberCatalog->upsert([
+                            'code' => $country['code'],
+                            'name' => $country['name'],
+                            'name_translations' => $country['name_translations'] ?? null,
+                            'price_usd' => $country['price_usd'],
+                            'margin_percent' => $newMargin,
+                            'provider_id' => $providerId,
+                            'is_active' => isset($country['is_active']) ? (int)$country['is_active'] : 1,
+                        ]);
+                        $updated++;
+                    }
+                } catch (Throwable $e) {
+                    error_log("Error updating margin: " . $e->getMessage());
+                    $this->clearAdminState($userDbId);
+                    $this->sendMessage($chatId, 'حدث خطأ أثناء تحديث نسبة الربح: ' . $e->getMessage(), []);
+                    return true;
                 }
                 
                 $this->clearAdminState($userDbId);
