@@ -3904,7 +3904,6 @@ class BotKernel
                 $this->clearAdminState($userDbId);
                 $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
                 return true;
-            case 'await_pricing_margin':
             case 'await_catalog_margin':
                 if (!is_numeric($trimmed)) {
                     $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 10 أو 15 أو 12.5). سيتم إضافة هذه النسبة إلى سعر الأرقام من المزود.', []);
@@ -3956,6 +3955,17 @@ class BotKernel
                     $updated
                 );
                 $this->sendMessage($chatId, $message, []);
+                return true;
+            case 'await_pricing_margin':
+                if (!is_numeric($trimmed)) {
+                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 10 أو 15 أو 12.5). سيتم إضافة هذه النسبة إلى سعر الأرقام من المزود.', []);
+                    return true;
+                }
+                $general = $this->settings->general();
+                $general['pricing_margin_percent'] = (float)$trimmed;
+                $this->settings->updateGeneral($general);
+                $this->clearAdminState($userDbId);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'تم الحفظ.', []);
                 return true;
             case 'await_transfer_fee':
                 if (!is_numeric($trimmed)) {
