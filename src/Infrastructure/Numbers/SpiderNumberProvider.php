@@ -29,12 +29,8 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestNumber(string $countryCode): array
     {
-        $query = http_build_query([
-            'apiKey' => $this->apiKey,
-            'action' => 'getNumber',
-            'country' => $countryCode,
-        ]);
-        $url = "{$this->baseUrl}?{$query}";
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=...&country=...
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getNumber&country=" . urlencode($countryCode);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -68,12 +64,8 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function requestCode(string $hashCode): array
     {
-        $query = http_build_query([
-            'apiKey' => $this->apiKey,
-            'action' => 'getCode',
-            'hash_code' => $hashCode,
-        ]);
-        $url = "{$this->baseUrl}?{$query}";
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=...&hash_code=...
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getCode&hash_code=" . urlencode($hashCode);
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -107,11 +99,8 @@ class SpiderNumberProvider implements NumberProviderInterface
      */
     public function getCountries(): array
     {
-        $query = http_build_query([
-            'apiKey' => $this->apiKey,
-            'action' => 'getCountrys',
-        ]);
-        $url = "{$this->baseUrl}?{$query}";
+        // بناء URL بنفس طريقة الملف المرفق: base_url?apiKay=KEY&action=getCountrys
+        $url = "{$this->baseUrl}?apiKay={$this->apiKey}&action=getCountrys";
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
