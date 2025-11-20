@@ -119,11 +119,15 @@ class SpiderNumberProvider implements NumberProviderInterface
 
         $decoded = json_decode($response, true);
         if (!is_array($decoded) || ($decoded['error'] ?? '') !== 'INFORMATION_SUCCESS') {
-            throw new RuntimeException('Failed to fetch countries from provider.');
+            $errorMsg = $decoded['msg'] ?? $decoded['error'] ?? 'Unknown error';
+            throw new RuntimeException('Failed to fetch countries from provider: ' . $errorMsg);
         }
 
-        $countries = $decoded['result']['countries'][1] ?? [];
-        if (!is_array($countries)) {
+        // API يرجع countries ككائن مع مفاتيح "1" و "2"، نحتاج "1"
+        $countriesData = $decoded['result']['countries'] ?? [];
+        $countries = $countriesData['1'] ?? $countriesData[1] ?? [];
+        
+        if (!is_array($countries) || empty($countries)) {
             return [];
         }
 

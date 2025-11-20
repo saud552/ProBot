@@ -1498,9 +1498,12 @@ class BotKernel
                                 []
                             );
                         } catch (Throwable $e) {
+                            $errorMsg = $e->getMessage();
+                            // تسجيل الخطأ في السجلات
+                            error_log("Auto import error: " . $errorMsg . "\n" . $e->getTraceAsString());
                             $this->sendMessage(
                                 $chatId,
-                                $strings['admin_catalog_auto_import_error'] ?? 'Failed to import countries: ' . $e->getMessage(),
+                                ($strings['admin_catalog_auto_import_error'] ?? 'Failed to import countries') . ': ' . $errorMsg,
                                 []
                             );
                         }

@@ -3,6 +3,10 @@ PRAGMA foreign_keys = ON;
 
 BEGIN TRANSACTION;
 
+-- Insert default number provider
+INSERT OR IGNORE INTO number_providers (id, name, base_url, api_key, status)
+VALUES (1, 'Spider Service', 'https://api.spider-service.com', '5qu6cfg785yxf88g6tgr', 'active');
+
 INSERT INTO settings ("key", "value")
 VALUES
 (
