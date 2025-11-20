@@ -19,6 +19,7 @@ use App\Domain\Support\TicketService;
 use App\Domain\Users\UserManager;
 use App\Domain\Wallet\WalletService;
 use App\Domain\Wallet\TransactionService;
+use App\Infrastructure\Numbers\SpiderNumberProvider;
 use App\Infrastructure\Storage\JsonStore;
 use App\Infrastructure\Repository\NumberOrderRepository;
 use App\Infrastructure\Repository\SmmOrderRepository;
@@ -49,6 +50,7 @@ class BotKernel
     private TransactionService $transactions;
     private NumberOrderRepository $numberOrders;
     private SmmOrderRepository $smmOrders;
+    private SpiderNumberProvider $numberProvider;
 
     /**
      * @var array<int, string>
@@ -91,7 +93,8 @@ class BotKernel
         SettingsService $settings,
         TransactionService $transactions,
         NumberOrderRepository $numberOrders,
-        SmmOrderRepository $smmOrders
+        SmmOrderRepository $smmOrders,
+        SpiderNumberProvider $numberProvider
     ) {
         $this->languages = $languages;
         $this->store = $store;
@@ -113,6 +116,7 @@ class BotKernel
         $this->transactions = $transactions;
         $this->numberOrders = $numberOrders;
         $this->smmOrders = $smmOrders;
+        $this->numberProvider = $numberProvider;
         $this->languageCache = $this->store->load('langs', []);
         $this->smmFlow = $this->store->load('smm_flow', []);
         $this->ticketFlow = $this->store->load('support_flow', []);
@@ -1434,6 +1438,74 @@ class BotKernel
                         );
                         return;
                     }
+                    if ($action === 'auto_import') {
+                        $this->answerCallback($callbackId, '⏳');
+                        try {
+                            $countries = $this->numberProvider->getCountries();
+                            if (empty($countries)) {
+                                $this->sendMessage(
+                                    $chatId,
+                                    $strings['admin_catalog_auto_import_error'] ?? 'Failed to fetch countries from provider.',
+                                    []
+                                );
+                                return;
+                            }
+                            $general = $this->settings->general();
+                            $margin = (float)($general['pricing_margin_percent'] ?? 0);
+                            $applied = 0;
+                            $existingCountries = [];
+                            foreach ($this->numberCatalog->allRaw() as $existing) {
+                                $existingCountries[strtoupper($existing['code'])] = $existing;
+                            }
+                            foreach ($countries as $code => $basePrice) {
+                                $finalPrice = $basePrice;
+                                if ($margin !== 0.0) {
+                                    $finalPrice += $basePrice * ($margin / 100);
+                                }
+                                $finalPrice = round($finalPrice, 2);
+                                $existing = $existingCountries[$code] ?? null;
+                                if ($existing) {
+                                    $payload = [
+                                        'code' => $code,
+                                        'name' => $existing['name'],
+                                        'name_translations' => $existing['name_translations'] ?? null,
+                                        'price_usd' => $finalPrice,
+                                        'margin_percent' => $margin,
+                                        'provider_id' => $existing['provider_id'] ?? 1,
+                                        'is_active' => $existing['is_active'] ?? 1,
+                                    ];
+                                } else {
+                                    $payload = [
+                                        'code' => $code,
+                                        'name' => $code,
+                                        'name_translations' => null,
+                                        'price_usd' => $finalPrice,
+                                        'margin_percent' => $margin,
+                                        'provider_id' => 1,
+                                        'is_active' => 1,
+                                    ];
+                                }
+                                $this->numberCatalog->upsert($payload);
+                                $applied++;
+                            }
+                            $this->sendMessage(
+                                $chatId,
+                                sprintf(
+                                    $strings['admin_catalog_auto_import_done'] ?? 'Successfully imported %d countries with %0.2f%% margin applied.',
+                                    $applied,
+                                    $margin
+                                ),
+                                []
+                            );
+                        } catch (Throwable $e) {
+                            $this->sendMessage(
+                                $chatId,
+                                $strings['admin_catalog_auto_import_error'] ?? 'Failed to import countries: ' . $e->getMessage(),
+                                []
+                            );
+                        }
+                        return;
+                    }
                 }
                 $this->showAdminCatalogPanel($chatId, $messageId, $strings);
                 $this->answerCallback($callbackId, '✅');
@@ -1864,6 +1936,9 @@ class BotKernel
             [
                 ['text' => $strings['admin_catalog_numbers_remove'] ?? 'Remove Country', 'callback_data' => 'admin:catalog:numbers:remove'],
                 ['text' => $strings['admin_catalog_numbers_import'] ?? 'Import Countries', 'callback_data' => 'admin:catalog:numbers:import'],
+            ],
+            [
+                ['text' => $strings['admin_catalog_numbers_auto_import'] ?? 'Auto Import Countries', 'callback_data' => 'admin:catalog:numbers:auto_import'],
             ],
             [
                 ['text' => $strings['admin_smm_categories'] ?? 'SMM Categories', 'callback_data' => 'admin:smm:categories'],
