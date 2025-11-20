@@ -1,3 +1,27 @@
 [Thu Nov 20 01:10:00 2025] PHP 8.3.6 Development Server (http://0.0.0.0:8080) started
 [Thu Nov 20 01:10:10 2025] 127.0.0.1:38864 Accepted
 [Thu Nov 20 01:10:10 2025] 127.0.0.1:38864 Closing
+[Thu Nov 20 01:10:22 2025] 127.0.0.1:37376 Accepted
+[Thu Nov 20 01:10:23 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
+Stack trace:
+#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
+#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
+#2 /workspace/src/Presentation/BotKernel.php(3995): App\Domain\Numbers\NumberCatalogService->upsert()
+#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
+#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
+#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
+#6 {main}
+  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
+[Thu Nov 20 01:10:23 2025] 127.0.0.1:37376 Closing
+[Thu Nov 20 01:12:02 2025] 127.0.0.1:60152 Accepted
+[Thu Nov 20 01:12:02 2025] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 19 FOREIGN KEY constraint failed in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php:67
+Stack trace:
+#0 /workspace/src/Infrastructure/Repository/NumberCountryRepository.php(67): PDOStatement->execute()
+#1 /workspace/src/Domain/Numbers/NumberCatalogService.php(70): App\Infrastructure\Repository\NumberCountryRepository->upsert()
+#2 /workspace/src/Presentation/BotKernel.php(3995): App\Domain\Numbers\NumberCatalogService->upsert()
+#3 /workspace/src/Presentation/BotKernel.php(229): App\Presentation\BotKernel->handleAdminStateInput()
+#4 /workspace/src/Presentation/BotKernel.php(135): App\Presentation\BotKernel->handleMessage()
+#5 /workspace/index.php(155): App\Presentation\BotKernel->handle()
+#6 {main}
+  thrown in /workspace/src/Infrastructure/Repository/NumberCountryRepository.php on line 67
+[Thu Nov 20 01:12:02 2025] 127.0.0.1:60152 Closing
