@@ -610,7 +610,7 @@ class BotKernel
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
-            $name = $this->countryDisplayName($country);
+            $name = $this->countryDisplayName($country, $languageCode);
             $row[] = [
                 'text' => sprintf('%s • $%0.2f', $name, $country['price_usd']),
                 'callback_data' => sprintf('numbers:country:%s:%d', $country['code'], $page),
@@ -697,7 +697,7 @@ class BotKernel
             $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
         } else {
             $lines = array_map(
-                fn (array $country): string => $this->formatStarCountryLine($country),
+                fn (array $country): string => $this->formatStarCountryLine($country, $languageCode),
                 $items
             );
             $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
@@ -706,7 +706,7 @@ class BotKernel
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
-            $name = $this->countryDisplayName($country);
+            $name = $this->countryDisplayName($country, $languageCode);
             $row[] = [
                 'text' => sprintf(
                     '%s • $%0.2f ≈ %d⭐️',
@@ -946,33 +946,58 @@ class BotKernel
         return $title . PHP_EOL . $priceLine . PHP_EOL . PHP_EOL . $disclaimer;
     }
 
-    private function formatCountryLine(array $country): string
+    private function formatCountryLine(array $country, ?string $languageCode = null): string
     {
         return sprintf(
             '%s • $%0.2f',
-            $this->esc($this->countryDisplayName($country)),
+            $this->esc($this->countryDisplayName($country, $languageCode)),
             $country['price_usd']
         );
     }
 
-    private function formatStarCountryLine(array $country): string
+    private function formatStarCountryLine(array $country, ?string $languageCode = null): string
     {
         return sprintf(
             '%s • $%0.2f ≈ %d⭐️',
-            $this->esc($this->countryDisplayName($country)),
+            $this->esc($this->countryDisplayName($country, $languageCode)),
             $country['price_usd'],
             $this->convertUsdToStars((float)$country['price_usd'])
         );
     }
 
-    private function countryDisplayName(array $country): string
+    private function countryDisplayName(array $country, ?string $languageCode = null): string
     {
         $display = (string)($country['display_name'] ?? '');
-        if ($display !== '') {
+        if ($display !== '' && $display !== ($country['code'] ?? '')) {
             return $display;
         }
 
-        return (string)($country['name'] ?? '');
+        // إذا لم يكن هناك display_name أو كان نفس الكود، جرب استخدام الترجمات من الملف
+        $code = strtoupper((string)($country['code'] ?? ''));
+        
+        if ($code !== '') {
+            static $countryNames = null;
+            if ($countryNames === null) {
+                $countryNames = require APP_BASE_PATH . '/lang/country_names.php';
+            }
+            
+            // استخدام اللغة الحالية للمستخدم
+            if ($languageCode && isset($countryNames[$languageCode][$code])) {
+                return $countryNames[$languageCode][$code];
+            }
+            
+            // جرب العربية كبديل
+            if (isset($countryNames['ar'][$code])) {
+                return $countryNames['ar'][$code];
+            }
+            
+            // جرب الإنجليزية كبديل
+            if (isset($countryNames['en'][$code])) {
+                return $countryNames['en'][$code];
+            }
+        }
+
+        return (string)($country['name'] ?? $code);
     }
 
     private function convertUsdToStars(float $price): int
