@@ -592,22 +592,21 @@ class BotKernel
      */
     private function numbersListPayload(array $strings, string $backLabel, int $page): array
     {
-        $perPage = 6;
+        $perPage = 20; // 20 دولة لكل صفحة (10 صفوف، كل صف دولتين)
         $languageCode = $strings['_lang'] ?? null;
         $pagination = $this->numberCatalog->paginate($page, $perPage, $languageCode);
         $items = $pagination['items'];
 
-        $text = $this->numbersMenuText($strings, $strings['numbers_usd_button'] ?? 'Buy with USD');
+        // بناء النص الترحيبي
+        $text = ($strings['numbers_welcome_title'] ?? '🏆 - أهلاً بك عزيزي في قسم حسابات تيليجرام الجاهزة 💥.') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_welcome_description'] ?? 'من خلال هذا القسم يمكنك شراء حسابات تيليجرام جاهز من أي دولة موجودة في الأسفل وبالسعر الموضح بجانبها بكل سهولة، بأسعار مغرية وضمان تفعيل الرقم ☑️ .') . PHP_EOL . PHP_EOL;
+        $text .= ($strings['numbers_welcome_instruction'] ?? '♻️ - يرجى إختيار الدولة التي تريد شراء حساب منها ، جميع الدول بالأسفل متوفر لديها أرقام ☑️ .');
+
         if ($items === []) {
             $text .= PHP_EOL . PHP_EOL . ($strings['no_numbers'] ?? 'No numbers available right now.');
-        } else {
-            $lines = array_map(
-                fn (array $country): string => $this->formatCountryLine($country),
-                $items
-            );
-            $text .= PHP_EOL . PHP_EOL . implode(PHP_EOL, $lines);
         }
 
+        // بناء لوحة المفاتيح: 20 دولة (كل دولتين في سطر)
         $keyboard = [];
         $row = [];
         foreach ($items as $country) {
@@ -621,21 +620,23 @@ class BotKernel
                 $row = [];
             }
         }
+        // إضافة الصف الأخير إذا كان يحتوي على دولة واحدة فقط
         if ($row !== []) {
             $keyboard[] = $row;
         }
 
+        // أزرار التنقل (التالي/السابق)
         if ($page > 0 || $pagination['has_next']) {
             $nav = [];
             if ($page > 0) {
                 $nav[] = [
-                    'text' => $strings['button_previous'] ?? 'Previous',
+                    'text' => $strings['button_previous'] ?? 'السابق',
                     'callback_data' => sprintf('numbers:list:%d', max(0, $page - 1)),
                 ];
             }
             if ($pagination['has_next']) {
                 $nav[] = [
-                    'text' => $strings['button_next'] ?? 'Next',
+                    'text' => $strings['button_next'] ?? 'التالي',
                     'callback_data' => sprintf('numbers:list:%d', $page + 1),
                 ];
             }
@@ -644,11 +645,9 @@ class BotKernel
             }
         }
 
+        // زر الرجوع للقائمة الرئيسية
         $keyboard[] = [
-            ['text' => $strings['main_numbers_button'] ?? 'Numbers', 'callback_data' => 'numbers:root'],
-        ];
-        $keyboard[] = [
-            ['text' => $strings['main_menu'] ?? 'Main Menu', 'callback_data' => 'back'],
+            ['text' => $strings['main_menu'] ?? 'القائمة الرئيسية', 'callback_data' => 'back'],
         ];
 
         return [
