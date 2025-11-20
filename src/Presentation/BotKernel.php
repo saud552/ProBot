@@ -1509,6 +1509,16 @@ class BotKernel
                         }
                         return;
                     }
+                    if ($action === 'margin') {
+                        $this->setAdminState($userDbId, ['state' => 'await_catalog_margin']);
+                        $this->answerCallback($callbackId, '✍️');
+                        $this->sendMessage(
+                            $chatId,
+                            $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 15 أو 12.5).',
+                            []
+                        );
+                        return;
+                    }
                 }
                 $this->showAdminCatalogPanel($chatId, $messageId, $strings);
                 $this->answerCallback($callbackId, '✅');
@@ -1930,7 +1940,15 @@ class BotKernel
 
     private function showAdminCatalogPanel(int $chatId, int $messageId, array $strings): void
     {
+        $general = $this->settings->general();
+        $margin = (float)($general['pricing_margin_percent'] ?? 0);
         $text = $strings['admin_catalog_title'] ?? 'Catalog Management';
+        $text .= PHP_EOL . PHP_EOL;
+        $text .= sprintf(
+            "%s: %0.2f%%",
+            $strings['admin_pricing_margin_label'] ?? 'هامش الربح العام',
+            $margin
+        );
         $keyboard = [
             [
                 ['text' => $strings['admin_catalog_numbers_list'] ?? 'List Countries', 'callback_data' => 'admin:catalog:numbers:list:0'],
@@ -1942,6 +1960,9 @@ class BotKernel
             ],
             [
                 ['text' => $strings['admin_catalog_numbers_auto_import'] ?? 'Auto Import Countries', 'callback_data' => 'admin:catalog:numbers:auto_import'],
+            ],
+            [
+                ['text' => $strings['admin_catalog_set_margin'] ?? 'تحديد نسبة الربح', 'callback_data' => 'admin:catalog:margin'],
             ],
             [
                 ['text' => $strings['admin_smm_categories'] ?? 'SMM Categories', 'callback_data' => 'admin:smm:categories'],
@@ -3839,15 +3860,16 @@ class BotKernel
                 $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
                 return true;
             case 'await_pricing_margin':
+            case 'await_catalog_margin':
                 if (!is_numeric($trimmed)) {
-                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'Send the global margin percentage (e.g. 15 or 12.5).', []);
+                    $this->sendMessage($chatId, $strings['admin_pricing_margin_prompt'] ?? 'أرسل النسبة المئوية للأرباح (مثال 15 أو 12.5).', []);
                     return true;
                 }
         $general = $this->settings->general();
         $general['pricing_margin_percent'] = (float)$trimmed;
         $this->settings->updateGeneral($general);
                 $this->clearAdminState($userDbId);
-                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'Saved.', []);
+                $this->sendMessage($chatId, $strings['admin_content_saved'] ?? 'تم الحفظ.', []);
                 return true;
             case 'await_transfer_fee':
                 if (!is_numeric($trimmed)) {
